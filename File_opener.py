@@ -24,6 +24,9 @@ def path_finder(path):
                 if not temp_stop_search.empty:
                     df_stop_search = pd.concat([df_stop_search, temp_stop_search], axis=0)
 
+    df_location.dropna(subset=['Crime ID'], inplace=True)
+
+
     return df_location, df_outcomes, df_stop_search
 
 
@@ -46,3 +49,6 @@ def file_opener(path):
 
 
 df_location, df_outcomes, df_stop_search = path_finder(r"data/London_crime_dataset_incomplete")
+df_location.to_csv('data/crime_location.csv', sep='\t', encoding='utf-8', index=False)
+df_outcomes.to_csv('data/crime_outcomes.csv', sep='\t', encoding='utf-8', index=False)
+df_stop_search.to_csv('data/stop_search.csv', sep='\t', encoding='utf-8', index=False)
