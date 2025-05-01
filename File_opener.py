@@ -51,8 +51,10 @@ def database_maker(df_location):
                           str(list[12])
                           )
         insert_query = '''INSERT INTO database.usertable 
-                                      (id, name, location, verified, followers_count, friends_count, lang) 
-                                      VALUES (%s, %s, %s, %s, %s, %s, %s);
+                                      ('Crime ID','Month','Reported by','Falls within','Longitude','Latitude',
+                                      'Location','LSOA code','LSOA name','Crime type','Last outcome category','Context'
+                                      ) 
+                                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
         '''
     try:
         mycursor.execute(insert_query, data_to_insert)
