@@ -1,7 +1,16 @@
 from pathlib import Path
 import csv
 import pandas as pd
+import mysql.connector
 
+
+
+mydb = mysql.connector.connect(
+        host="localhost",
+        user="root",
+        password="Your_Password",
+        database="Database_Name"
+    )
 
 def path_finder(path):
     """
@@ -9,46 +18,55 @@ def path_finder(path):
     """
 
     df_location = pd.DataFrame()
-    df_outcomes = pd.DataFrame()
-    df_stop_search = pd.DataFrame()
+
     # gets and opens all the files in the folder
     folder_path = Path(path)
     for folder in folder_path.iterdir():
         for file_path in folder.iterdir():
             if file_path.is_file():
-                temp_location, temp_outcome, temp_stop_search = file_opener(file_path)
-                if not temp_location.empty:
-                    df_location = pd.concat([df_location, temp_location], axis=0)
-                if not temp_outcome.empty:
-                    df_outcomes = pd.concat([df_outcomes, temp_outcome], axis=0)
-                if not temp_stop_search.empty:
-                    df_stop_search = pd.concat([df_stop_search, temp_stop_search], axis=0)
+                temp_location = file_opener(file_path)
+                df_location = pd.concat([df_location, temp_location], axis=0)
 
-    df_location.dropna(subset=['Crime ID'], inplace=True)
+    # df_location.dropna(subset=['Crime ID','Latitude'], inplace=True)
 
-
-    return df_location, df_outcomes, df_stop_search
+    return df_location
 
 
 
 def file_opener(path):
     path = str(path)
-    df_location = pd.DataFrame()
-    df_outcomes = pd.DataFrame()
-    df_stop_search = pd.DataFrame()
 
-    if 'street' in path:
-        df_location = pd.read_csv(path)
-        return df_location, df_outcomes, df_stop_search
-    elif 'outcomes' in path:
-        df_outcomes = pd.read_csv(path)
-        return df_location, df_outcomes, df_stop_search
-    else:
-        df_stop_search = pd.read_csv(path)
-        return df_location, df_outcomes, df_stop_search
+    df_location = pd.read_csv(path)
+    database_maker(df_location)
+    return df_location
 
 
-df_location, df_outcomes, df_stop_search = path_finder(r"data/London_crime_dataset_incomplete")
-df_location.to_csv('data/crime_location.csv', sep='\t', encoding='utf-8', index=False)
-df_outcomes.to_csv('data/crime_outcomes.csv', sep='\t', encoding='utf-8', index=False)
-df_stop_search.to_csv('data/stop_search.csv', sep='\t', encoding='utf-8', index=False)
+def database_maker(df_location):
+    df_list = df_location.values.tolist()
+    for list in df_list:
+        mycursor = mydb.cursor()
+        data_to_insert = (str(list[0]), str(list[1]), str(list[2]), str(list[3]),
+                          str(list[4]), str(list[5]), str(list[6]), str(list[7]),
+                          str(list[8]), str(list[9]), str(list[10]), str(list[11]),
+                          str(list[12])
+                          )
+        insert_query = '''INSERT INTO database.usertable 
+                                      (id, name, location, verified, followers_count, friends_count, lang) 
+                                      VALUES (%s, %s, %s, %s, %s, %s, %s);
+        '''
+    try:
+        mycursor.execute(insert_query, data_to_insert)
+    except mysql.connector.errors.IntegrityError:
+        pass
+    mydb.commit()
+
+df_location = path_finder(r"data/london_crime_database_incomplete")
+
+print(f'len df location: {len(df_location)}')
+print(f'location columns: {df_location.columns}')
+print(f'NaN values ID: {len(df_location[df_location["Crime ID"].isna()])}')
+print(f'NaN latitude: {len(df_location[df_location["Latitude"].isna()])}')
+print(f'NaN longitude: {len(df_location[df_location["Longitude"].isna()])}')
+print(f'NaN longitude and ID: {len(df_location[df_location["Longitude"].isna() & df_location["Crime ID"].isna()])}')
+print(f'burglaries:: {len(df_location[df_location["Crime type"] == "Burglary"])}')
+
