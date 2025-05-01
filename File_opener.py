@@ -1,16 +1,11 @@
 from pathlib import Path
 import csv
 import pandas as pd
-import mysql.connector
+import pymysql
 
 
 
-mydb = mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="Your_Password",
-        database="Database_Name"
-    )
+
 
 def path_finder(path):
     """
@@ -18,7 +13,6 @@ def path_finder(path):
     """
 
     df_location = pd.DataFrame()
-
     # gets and opens all the files in the folder
     folder_path = Path(path)
     for folder in folder_path.iterdir():
@@ -27,8 +21,9 @@ def path_finder(path):
                 temp_location = file_opener(file_path)
                 df_location = pd.concat([df_location, temp_location], axis=0)
 
-    # df_location.dropna(subset=['Crime ID','Latitude'], inplace=True)
+    df_location.dropna(subset=['Crime ID','Latitude'], inplace=True)
 
+    database_maker(df_location)
     return df_location
 
 
@@ -37,30 +32,40 @@ def file_opener(path):
     path = str(path)
 
     df_location = pd.read_csv(path)
-    database_maker(df_location)
+
     return df_location
 
 
 def database_maker(df_location):
+    mydb = pymysql.connect(
+        host="localhost",
+        user="root",
+        password="your password",
+        database="your database"
+    )
+
+    mycursor = mydb.cursor()
+
+    insert_query = '''
+        INSERT INTO 'your table' 
+        (`Crime ID`, `Month`, `Reported by`, `Falls within`, `Longitude`, `Latitude`,
+         `Location`, `LSOA code`, `LSOA name`, `Crime type`, `Last outcome category`, `Context`)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+    '''
+
     df_list = df_location.values.tolist()
-    for list in df_list:
-        mycursor = mydb.cursor()
-        data_to_insert = (str(list[0]), str(list[1]), str(list[2]), str(list[3]),
-                          str(list[4]), str(list[5]), str(list[6]), str(list[7]),
-                          str(list[8]), str(list[9]), str(list[10]), str(list[11]),
-                          str(list[12])
-                          )
-        insert_query = '''INSERT INTO database.usertable 
-                                      ('Crime ID','Month','Reported by','Falls within','Longitude','Latitude',
-                                      'Location','LSOA code','LSOA name','Crime type','Last outcome category','Context'
-                                      ) 
-                                      VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
-        '''
-    try:
-        mycursor.execute(insert_query, data_to_insert)
-    except mysql.connector.errors.IntegrityError:
-        pass
+
+    for row in df_list:
+        try:
+            data_to_insert = tuple(str(item) for item in row)
+            mycursor.execute(insert_query, data_to_insert)
+        except pymysql.MySQLError as e:
+            print(f"Error inserting row: {e}")
+            continue  # Skip to next row
+
     mydb.commit()
+    mycursor.close()
+    mydb.close()
 
 df_location = path_finder(r"data/london_crime_database_incomplete")
 
