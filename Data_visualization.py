@@ -5,7 +5,8 @@ import numpy as np
 from Data_loader import data_loader  
 import os
 import matplotlib.cm as cm
-from matplotlib.colors import Normalize
+from matplotlib.colors import Normalize, LinearSegmentedColormap
+import contextily as ctx  
 
 if not os.path.exists('visualizations'):
     os.makedirs('visualizations')
@@ -43,17 +44,30 @@ plt.tight_layout()
 plt.savefig('visualizations/crime_types.png')
 plt.show()
 
-# 2. Crime geographic distribution scatter plot
+# 2. Crime geographic distribution scatter plot with London map background
 plt.figure(figsize=(14, 12))
 valid_loc = df_crimes.dropna(subset=['Longitude', 'Latitude'])
-plt.scatter(valid_loc['Longitude'], valid_loc['Latitude'], 
-           alpha=0.4, c='darkblue', s=15, edgecolor='none')
+
+# Check if the data is within the London area
+# Approximate longitude and latitude range of London
+london_bounds = [-0.5, 0.3, 51.3, 51.7]  
+# [minimum longitude, maximum longitude, minimum latitude, maximum latitude]
+
+london_data = valid_loc[
+    (valid_loc['Longitude'] >= london_bounds[0]) & (valid_loc['Longitude'] <= london_bounds[1]) &
+    (valid_loc['Latitude'] >= london_bounds[2]) & (valid_loc['Latitude'] <= london_bounds[3])
+]
+
+plt.scatter(london_data['Longitude'], london_data['Latitude'], 
+           alpha=0.6, c='red', s=15, edgecolor='none')
+
+ctx.add_basemap(plt.gca(), crs="EPSG:4326", source=ctx.providers.CartoDB.Positron, alpha=0.7)
+
 plt.title('The geography of crime in London', fontsize=18)
 plt.xlabel('longitude', fontsize=14)
 plt.ylabel('latitude', fontsize=14)
-plt.grid(True, linestyle='--', alpha=0.7)
 plt.tight_layout()
-plt.savefig('visualizations/crime_map.png')
+plt.savefig('visualizations/crime_map_with_background.png', dpi=300)
 plt.show()
 
 # 3. Monthly Crime Trends Chart
@@ -100,18 +114,36 @@ plt.tight_layout()
 plt.savefig('visualizations/outcome_categories.png')
 plt.show()
 
-# 6. Crime density in London(Heat map)
+# 6. Crime density in London(Heat map) with London map background
 plt.figure(figsize=(14, 12))
-valid_loc = df_crimes.dropna(subset=['Longitude', 'Latitude'])
-hexbin = plt.hexbin(valid_loc['Longitude'], valid_loc['Latitude'], 
-           gridsize=50, cmap='YlOrRd', mincnt=1)
-cb = plt.colorbar(label='crime amount')
-cb.ax.tick_params(labelsize=12)
+
+london_data = valid_loc[
+    (valid_loc['Longitude'] >= london_bounds[0]) & (valid_loc['Longitude'] <= london_bounds[1]) &
+    (valid_loc['Latitude'] >= london_bounds[2]) & (valid_loc['Latitude'] <= london_bounds[3])
+]
+
+colors = [(0, 0, 0, 0), (1, 0.1, 0, 0.9)] 
+cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
+
+heatmap, xedges, yedges = np.histogram2d(
+    london_data['Longitude'], london_data['Latitude'], 
+    bins=100, range=[
+        [london_bounds[0], london_bounds[1]], 
+        [london_bounds[2], london_bounds[3]]
+    ]
+)
+extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+
+plt.imshow(heatmap.T, extent=extent, origin='lower', cmap='YlOrRd', alpha=0.7, aspect='auto')
+
+ctx.add_basemap(plt.gca(), crs="EPSG:4326", source=ctx.providers.CartoDB.Positron, alpha=0.8)
+
+plt.colorbar(label='crime amount')
 plt.title('Crime density in London', fontsize=18)
 plt.xlabel('longitude', fontsize=14)
 plt.ylabel('latitude', fontsize=14)
 plt.tight_layout()
-plt.savefig('visualizations/crime_heatmap.png')
+plt.savefig('visualizations/crime_heatmap_with_background.png', dpi=300)
 plt.show()
 
 # 7. Crime amounts by LSOA area
@@ -127,7 +159,7 @@ plt.tight_layout()
 plt.savefig('visualizations/crime_by_lsoa.png')
 plt.show()
 
-# 8. Comparison of geographical distribution of different crime types
+# 8. Comparison of geographical distribution of different crime types with London map background
 plt.figure(figsize=(16, 12))
 # Get the top 6 most common crime types and set color
 top_crimes = df_crimes['Crime type'].value_counts().head(6).index.tolist()
@@ -137,16 +169,133 @@ crime_color_map = dict(zip(top_crimes, colors))
 for crime, color in crime_color_map.items():
     crime_data = df_crimes[df_crimes['Crime type'] == crime]
     crime_data = crime_data.dropna(subset=['Longitude', 'Latitude'])
-    plt.scatter(crime_data['Longitude'], crime_data['Latitude'], 
+    crime_london_data = crime_data[
+        (crime_data['Longitude'] >= london_bounds[0]) & (crime_data['Longitude'] <= london_bounds[1]) &
+        (crime_data['Latitude'] >= london_bounds[2]) & (crime_data['Latitude'] <= london_bounds[3])
+    ]
+    plt.scatter(crime_london_data['Longitude'], crime_london_data['Latitude'], 
               alpha=0.6, c=color, label=crime, s=20, edgecolor='none')
+
+ctx.add_basemap(plt.gca(), crs="EPSG:4326", source=ctx.providers.CartoDB.Positron, alpha=0.7)
 
 plt.title('Comparison of geographical distribution of different crime types', fontsize=18)
 plt.xlabel('longitude', fontsize=14)
 plt.ylabel('latitude', fontsize=14)
-plt.grid(True, linestyle='--', alpha=0.5)
 plt.legend(fontsize=12)
 plt.tight_layout()
-plt.savefig('visualizations/crime_types_map.png')
+plt.savefig('visualizations/crime_types_map_with_background.png', dpi=300)
 plt.show()
+
+# ==== Burglary Analysis ====
+burglary_df = df_crimes[df_crimes['Crime type'] == 'Burglary']
+print(f"Number of burglary cases: {len(burglary_df)}")
+
+# 9. Monthly trend analysis of burglary
+plt.figure(figsize=(14, 8))
+if 'Month' in burglary_df.columns:
+    if pd.api.types.is_datetime64_dtype(burglary_df['Month']):
+        monthly_burglary = burglary_df.groupby(burglary_df['Month'].dt.to_period('M')).size()
+        monthly_burglary.index = monthly_burglary.index.astype(str)
+    
+    monthly_burglary.plot(kind='line', marker='o', linewidth=2, markersize=8, color='crimson')
+    plt.title('Monthly Burglary Trends', fontsize=18)
+    plt.xlabel('month', fontsize=14)
+    plt.ylabel('burglary amount', fontsize=14)
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig('visualizations/burglary_monthly_trend.png')
+    plt.show()
+
+# 10. Geography distribution of burglary with London map background
+plt.figure(figsize=(14, 12))
+valid_burglary = burglary_df.dropna(subset=['Longitude', 'Latitude'])
+burglary_london = valid_burglary[
+    (valid_burglary['Longitude'] >= london_bounds[0]) & (valid_burglary['Longitude'] <= london_bounds[1]) &
+    (valid_burglary['Latitude'] >= london_bounds[2]) & (valid_burglary['Latitude'] <= london_bounds[3])
+]
+
+plt.scatter(burglary_london['Longitude'], burglary_london['Latitude'], 
+           alpha=0.7, c='darkred', s=20, edgecolor='none')
+
+
+ctx.add_basemap(plt.gca(), crs="EPSG:4326", source=ctx.providers.CartoDB.Positron, alpha=0.7)
+
+plt.title('Geographical Distribution of Burglary in London', fontsize=18)
+plt.xlabel('longitude', fontsize=14)
+plt.ylabel('latitude', fontsize=14)
+plt.tight_layout()
+plt.savefig('visualizations/burglary_map_with_background.png', dpi=300)
+plt.show()
+
+# 11. Burglary heatmap with London map background
+plt.figure(figsize=(14, 12))
+
+colors = [(0, 0, 0, 0), (1, 0.1, 0, 0.9)]  
+cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
+
+heatmap, xedges, yedges = np.histogram2d(
+    burglary_london['Longitude'], burglary_london['Latitude'], 
+    bins=75, range=[
+        [london_bounds[0], london_bounds[1]], 
+        [london_bounds[2], london_bounds[3]]
+    ]
+)
+extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+
+plt.imshow(heatmap.T, extent=extent, origin='lower', cmap='Reds', alpha=0.7, aspect='auto')
+
+ctx.add_basemap(plt.gca(), crs="EPSG:4326", source=ctx.providers.CartoDB.Positron, alpha=0.8)
+
+plt.colorbar(label='burglary amount')
+plt.title('Burglary Density in London', fontsize=18)
+plt.xlabel('longitude', fontsize=14)
+plt.ylabel('latitude', fontsize=14)
+plt.tight_layout()
+plt.savefig('visualizations/burglary_heatmap_with_background.png', dpi=300)
+plt.show()
+
+# 12. Distribution of burglary cases in each LSOA area
+plt.figure(figsize=(16, 10))
+lsoa_burglary = burglary_df['LSOA name'].value_counts().head(15)
+sns.barplot(x=lsoa_burglary.values, y=lsoa_burglary.index, palette='Reds_r')
+plt.title('Burglary-prone areas (top 15 LSOAs)', fontsize=18)
+plt.xlabel('burglary amount', fontsize=14)
+plt.ylabel('LSOA areas', fontsize=14)
+plt.grid(axis='x', linestyle='--', alpha=0.7)
+plt.tight_layout()
+plt.savefig('visualizations/burglary_by_lsoa.png')
+plt.show()
+
+# 13. Percentage of burglary
+plt.figure(figsize=(12, 8))
+
+df_crimes['Crime Category'] = df_crimes['Crime type'].apply(
+    lambda x: 'Burglary' if x == 'Burglary' else 'Other Crimes')
+category_counts = df_crimes['Crime Category'].value_counts()
+
+plt.pie(category_counts, labels=category_counts.index, autopct='%1.1f%%', 
+        startangle=90, colors=['crimson', 'lightblue'], explode=(0.05, 0))
+plt.title('Burglary vs Other Crimes', fontsize=18)
+plt.axis('equal') 
+plt.tight_layout()
+plt.savefig('visualizations/burglary_vs_other.png')
+plt.show()
+
+# 14. Classification of burglary outcome
+plt.figure(figsize=(14, 8))
+if 'Last outcome category' in burglary_df.columns:
+    outcome_burglary = burglary_df['Last outcome category'].value_counts()
+    if len(outcome_burglary) > 10:
+        outcome_burglary = outcome_burglary.head(10)
+    sns.barplot(x=outcome_burglary.values, y=outcome_burglary.index, palette='YlOrBr')
+    plt.title('Burglary Case Outcomes (Top 10)', fontsize=18)
+    plt.xlabel('amount', fontsize=14)
+    plt.ylabel('outcome category', fontsize=14)
+    plt.grid(axis='x', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.savefig('visualizations/burglary_outcomes.png')
+    plt.show()
+
 
 print("Visualization analysis is complete! All charts have been saved to the 'visualizations' folder.")
