@@ -16,10 +16,13 @@ def path_finder(path):
     # gets and opens all the files in the folder
     folder_path = Path(path)
     for folder in folder_path.iterdir():
+        print(folder)
         for file_path in folder.iterdir():
             if file_path.is_file():
+                print(folder,file_path)
                 temp_location = file_opener(file_path)
                 df_location = pd.concat([df_location, temp_location], axis=0)
+                
 
     df_location.dropna(subset=['Crime ID','Latitude'], inplace=True)
 
@@ -40,14 +43,14 @@ def database_maker(df_location):
     mydb = pymysql.connect(
         host="localhost",
         user="root",
-        password="your password",
-        database="your database"
+        password="Data_challenge2",
+        database="crime_database"
     )
 
     mycursor = mydb.cursor()
 
     insert_query = '''
-        INSERT INTO 'your table' 
+        INSERT INTO crimes 
         (`Crime ID`, `Month`, `Reported by`, `Falls within`, `Longitude`, `Latitude`,
          `Location`, `LSOA code`, `LSOA name`, `Crime type`, `Last outcome category`, `Context`)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
@@ -67,7 +70,7 @@ def database_maker(df_location):
     mycursor.close()
     mydb.close()
 
-df_location = path_finder(r"data/london_crime_database_incomplete")
+df_location = path_finder(r"dataset")
 
 print(f'len df location: {len(df_location)}')
 print(f'location columns: {df_location.columns}')

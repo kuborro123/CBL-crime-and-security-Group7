@@ -1,4 +1,4 @@
-import mysql.connector
+import pymysql
 import pandas as pd
 
 def data_loader(query):
@@ -6,11 +6,11 @@ def data_loader(query):
     Loads all the data into a dictionary from the SQL database so it can be used.
     """
 
-    mydb = mysql.connector.connect(
+    mydb = pymysql.connect(
             host="localhost",
             user="root",
-            password="Your_Password",
-            database="Database_Name"
+            password="Data_challenge2",
+            database="crime_database"
         )
 
     mycursor = mydb.cursor()
@@ -20,5 +20,7 @@ def data_loader(query):
     myresult = mycursor.fetchall()
 
     data = pd.DataFrame(myresult, columns=[col[0] for col in mycursor.description])
-    data = data.set_index('id').T.to_dict('list')
+    # data = data.set_index('Crime ID').T.to_dict('list')
     return data
+
+
