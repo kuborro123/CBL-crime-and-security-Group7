@@ -5,8 +5,6 @@ import pymysql
 
 
 
-
-
 def path_finder(path):
     """
     :param path a file path to the folder with the data.
@@ -16,10 +14,8 @@ def path_finder(path):
     # gets and opens all the files in the folder
     folder_path = Path(path)
     for folder in folder_path.iterdir():
-        print(folder)
         for file_path in folder.iterdir():
             if file_path.is_file():
-                print(folder,file_path)
                 temp_location = file_opener(file_path)
                 df_location = pd.concat([df_location, temp_location], axis=0)
                 
@@ -34,9 +30,9 @@ def path_finder(path):
 def file_opener(path):
     path = str(path)
 
-    df_location = pd.read_csv(path)
+    df = pd.read_csv(path)
 
-    return df_location
+    return df
 
 
 def database_maker(df_location):
@@ -70,7 +66,40 @@ def database_maker(df_location):
     mycursor.close()
     mydb.close()
 
+def deprivation(path):
+    df_deprivation = file_opener(path)
+
+    mydb = pymysql.connect(
+        host="localhost",
+        user="root",
+        password="Data_challenge1",
+        database="crime_database"
+    )
+
+    mycursor = mydb.cursor()
+
+    insert_query = '''
+            INSERT INTO deprivation 
+            (FeatureCode,DateCode,Measurement,Units,Value,Indices_of_Deprivation)
+            VALUES (%s, %s, %s, %s, %s, %s);
+        '''
+
+    df_list = df_deprivation.values.tolist()
+
+    for row in df_list:
+        try:
+            data_to_insert = tuple(str(item) for item in row)
+            mycursor.execute(insert_query, data_to_insert)
+        except pymysql.MySQLError as e:
+            print(f"Error inserting row: {e}")
+            continue  # Skip to next row
+
+    mydb.commit()
+    mycursor.close()
+    mydb.close()
+
 df_location = path_finder(r"dataset")
+deprivation(r'data/imd2019lsoa.csv')
 
 print(f'len df location: {len(df_location)}')
 print(f'location columns: {df_location.columns}')

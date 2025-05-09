@@ -3,13 +3,13 @@ import pandas as pd
 
 def data_loader(query):
     """
-    Loads all the data into a dictionary from the SQL database so it can be used.
+    Loads all the data into a pandas dataframe from the SQL database so it can be used.
     """
 
     mydb = pymysql.connect(
             host="localhost",
             user="root",
-            password="Data_challenge2",
+            password="Data_challenge1",
             database="crime_database"
         )
 
