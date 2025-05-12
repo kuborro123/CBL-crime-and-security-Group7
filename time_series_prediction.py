@@ -7,16 +7,14 @@ import pmdarima as pm
 
 
 def prediction_network():
-    df_deprivation = get_deprivation_score()
-    df_crimes_month = burglaries_month_LSOA()
-    df_crimes_deprivation = pd.merge(df_crimes_month, df_deprivation, on='LSOA_code', how='inner')
+    df_crime_month = burglaries_month_LSOA()
 
-    df_crimes_deprivation['month'] = pd.to_datetime(df_crimes_deprivation['month'], infer_datetime_format=True)
-    df_crimes_deprivation = df_crimes_deprivation.set_index(['month'])
+    df_crime_month['month'] = pd.to_datetime(df_crime_month['month'], infer_datetime_format=True)
+    df_crime_month = df_crime_month.set_index(['month'])
 
-    df_crimes_deprivation = fill_missing_months(df_crimes_deprivation)
+    df_crime_month = fill_missing_months(df_crime_month)
 
-    grouped = df_crimes_deprivation.groupby('LSOA_code')
+    grouped = df_crime_month.groupby('LSOA_code')
     for LSOA_code, group in grouped:
         group['crime_diff'] = group['crime_count'].diff(periods=4)
         group['crime_diff'].fillna(method='backfill', inplace=True)
@@ -121,7 +119,6 @@ def fill_missing_months(df_crimes_deprivation):
         group = group.sort_index()
         group_reindexed = group.reindex(full_index)
         group_reindexed['LSOA_code'] = LSOA_code
-        group_reindexed['deprivation'] = group['deprivation'].iloc[0]
         filled_dfs.append(group_reindexed)
 
     df_filled = pd.concat(filled_dfs)
