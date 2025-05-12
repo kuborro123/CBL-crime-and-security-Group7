@@ -4,7 +4,7 @@ def burglaries_month_LSOA():
     """"
     selects the amount of burglaries that happend that month in every LSOA
     """
-    query = '''SELECT LSOA_code, month, count(Crime_type) as count
+    query = '''SELECT LSOA_code, month, count(Crime_type) as crime_count
     FROM crimes
     where (Crime_type = 'burglary')
     group by LSOA_code, month
@@ -16,9 +16,10 @@ def get_deprivation_score():
     """
     selects right deprivation score with LSOA code
     """
-    query = '''SELECT FeatureCode as LSOA_code, value
+    query = '''SELECT FeatureCode as LSOA_code, avg(value) as deprivation
         FROM deprivation
         where Measurement = 'Decile '
+        group by LSOA_code
         '''
     return data_loader(query)
 

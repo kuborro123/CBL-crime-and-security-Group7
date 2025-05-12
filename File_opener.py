@@ -22,6 +22,10 @@ def path_finder(path):
 
     df_location.dropna(subset=['Crime ID','Latitude'], inplace=True)
 
+    LSOA_codes_df = pd.read_csv('data/All_LSOA_codes_london.csv')
+    LSOA_codes = LSOA_codes_df['LSOA code'].tolist()
+    df_location = df_location[df_location['LSOA code'].isin(LSOA_codes)]
+
     database_maker(df_location)
     return df_location
 
@@ -39,7 +43,7 @@ def database_maker(df_location):
     mydb = pymysql.connect(
         host="localhost",
         user="root",
-        password="Data_challenge2",
+        password="Data_challenge1",
         database="crime_database"
     )
 
@@ -47,8 +51,8 @@ def database_maker(df_location):
 
     insert_query = '''
         INSERT INTO crimes 
-        (`Crime ID`, `Month`, `Reported by`, `Falls within`, `Longitude`, `Latitude`,
-         `Location`, `LSOA code`, `LSOA name`, `Crime type`, `Last outcome category`, `Context`)
+        (`Crime_ID`, `Month`, `Reported_by`, `Falls_within`, `Longitude`, `Latitude`,
+         `Location`, `LSOA_code`, `LSOA_name`, `Crime_type`, `Last_outcome_category`, `Context`)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
     '''
 
@@ -68,6 +72,10 @@ def database_maker(df_location):
 
 def deprivation(path):
     df_deprivation = file_opener(path)
+
+    LSOA_codes_df = pd.read_csv('data/All_LSOA_codes_london.csv')
+    LSOA_codes = LSOA_codes_df['LSOA code'].tolist()
+    df_deprivation = df_deprivation[df_deprivation['FeatureCode'].isin(LSOA_codes)]
 
     mydb = pymysql.connect(
         host="localhost",
@@ -98,7 +106,7 @@ def deprivation(path):
     mycursor.close()
     mydb.close()
 
-df_location = path_finder(r"dataset")
+df_location = path_finder(r"data/london_crime_database_incomplete")
 deprivation(r'data/imd2019lsoa.csv')
 
 print(f'len df location: {len(df_location)}')
