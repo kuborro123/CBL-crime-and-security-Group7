@@ -19,7 +19,7 @@ def get_deprivation_score():
     query = '''SELECT FeatureCode as LSOA_code, avg(value) as deprivation
         FROM deprivation
         where Measurement = 'Decile '
-        group by LSOA_code
+        group by FeatureCode
         '''
     return data_loader(query)
 
