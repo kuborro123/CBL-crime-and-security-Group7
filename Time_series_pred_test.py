@@ -4,67 +4,110 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 import pandas as pd
 import matplotlib.pylab as plt
 import pmdarima as pm
+from tqdm import tqdm
+from joblib import Parallel, delayed
 
 
 def prediction_network():
     df_crime_month = burglaries_month_LSOA()
-
     df_crime_month['month'] = pd.to_datetime(df_crime_month['month'], infer_datetime_format=True)
     df_crime_month = df_crime_month.set_index(['month'])
-
     df_crime_month = fill_missing_months(df_crime_month)
 
     grouped = df_crime_month.groupby('LSOA_code')
-    for LSOA_code, group in grouped:
-        group['crime_diff'] = group['crime_count'].diff(periods=4)
-        group['crime_diff'].fillna(method='backfill', inplace=True)
 
-        ### Plot the graph comment out if not wanted ###
-        plot_trend_season_residual(LSOA_code, group)
+    print(datetime.now())
+    results = Parallel(n_jobs=-1)(delayed(process_group)(code, group) for code, group in tqdm(grouped))
 
-        group['month_index'] = group.index.month
+    # Aggregate the results
+    df_prediction_accuracy = pd.DataFrame(results)
+    df_prediction_accuracy = df_prediction_accuracy.sum().to_frame().T  # collapse into single-row summary
 
-        SARIMAX_model = pm.auto_arima(group[['crime_count']], exogenous=group[['month_index']],
+    with pd.option_context('display.max_columns', None):
+        print(df_prediction_accuracy)
+    print(datetime.now())
+
+
+def process_group(LSOA_code, group):
+    group['crime_diff'] = group['crime_count'].diff(periods=4)
+    group['crime_diff'].fillna(method='backfill', inplace=True)
+    group['month_index'] = group.index.month
+
+    group_train = group[group.index != datetime(2025, 2, 1)]
+    group_test = group[group.index == datetime(2025, 2, 1)]
+
+    try:
+        SARIMAX_model = pm.auto_arima(group_train[['crime_count']], exogenous=group_train[['month_index']],
                                       start_p=1, start_q=1,
-                                      test='adf',
-                                      max_p=3, max_q=3, m=12,
+                                      max_p=1, max_q=1, m=12,
                                       start_P=0, seasonal=True,
                                       d=None, D=1,
-                                      trace=False,
-                                      error_action='ignore',
-                                      suppress_warnings=True,
-                                      stepwise=True)
+                                      trace=False, error_action='ignore',
+                                      suppress_warnings=True, stepwise=True)
 
-        sarimax_forecast(SARIMAX_model, group, LSOA_code, periods=4)
-        
+        fitted, lower, high = sarimax_forecast(SARIMAX_model, group_train, periods=1)
+
+        prediction = fitted.values[0]
+        lower = lower.values[0]
+        high = high.values[0]
+        value = group_test['crime_count'].values[0]
+
+        metrics = {
+            'Pred_right': int(round(prediction) == value),
+            'Pred_wrong_high': int(round(prediction) > value),
+            'pred_wrong_low': int(round(prediction) < value),
+            'In_range': int(lower <= value <= high),
+            'Out_range_low': int(value < lower),
+            'Out_range_high': int(value > high),
+            'total': 1
+        }
+
+    except Exception as e:
+        print(group)
+
+        return {
+            'Pred_right': 0,
+            'Pred_wrong_high': 0,
+            'pred_wrong_low': 0,
+            'In_range': 0,
+            'Out_range_low': 0,
+            'Out_range_high': 0,
+            'total': 0
+        }
 
 
-def sarimax_forecast(SARIMAX_model, prediction_df, lsoa, periods):
+    return metrics
+
+
+def sarimax_forecast(SARIMAX_model, prediction_df, periods):
     # Forecast
     n_periods = periods
 
     forecast_df = pd.DataFrame(
-            {'month_index': pd.date_range(prediction_df.index[-1], periods=n_periods, freq='MS').month},
-                    index=pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
-                )
+        {'month_index': pd.date_range(prediction_df.index[-1], periods=n_periods, freq='MS').month},
+        index=pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
+    )
 
     fitted, confint = SARIMAX_model.predict(n_periods=n_periods,
                                             return_conf_int=True,
                                             exogenous=forecast_df[['month_index']])
     index_of_fc = pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
 
-    ### Plot the graph comment out if not wanted ###
-    forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa)
-
-
-def forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa):
-    # make series for plotting purpose
     fitted_series = pd.Series(fitted, index=index_of_fc)
     lower_series = pd.Series(confint[:, 0], index=index_of_fc)
     upper_series = pd.Series(confint[:, 1], index=index_of_fc)
+
     fitted_series[fitted_series < 0] = 0
     lower_series[lower_series < 0] = 0
     upper_series[upper_series < 0] = 0
+
+    ### Plot the graph comment out if not wanted ###
+    # forcast_plot(fitted_series, lower_series, upper_series, confint, index_of_fc, prediction_df)
+
+    return fitted_series, lower_series, upper_series
+
+
+def forcast_plot(fitted_series, lower_series, upper_series, confint, index_of_fc, prediction_df):
     # Plot
     plt.figure(figsize=(15, 7))
     plt.plot(prediction_df['crime_count'], color='#1f76b4')
@@ -74,7 +117,7 @@ def forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa):
                      upper_series,
                      color='k', alpha=.15)
 
-    plt.title(f'SARIMAX - Forecast of LSOA: {lsoa}')
+    plt.title('SARIMAX - Forecast of Airline Passengers')
     plt.show()
 
 
@@ -92,22 +135,18 @@ def plot_trend_season_residual(LSOA_code, group):
     plt.subplot(4, 1, 1)
     plt.plot(group['crime_count'], label='Original Series')
     plt.legend()
-    plt.xticks(rotation=45)
 
     plt.subplot(4, 1, 2)
     plt.plot(trend, label='Trend')
     plt.legend()
-    plt.xticks(rotation=45)
 
     plt.subplot(4, 1, 3)
     plt.plot(seasonal, label='Seasonal')
     plt.legend()
-    plt.xticks(rotation=45)
 
     plt.subplot(4, 1, 4)
     plt.plot(residual, label='Residuals')
     plt.legend()
-    plt.xticks(rotation=45)
 
     plt.tight_layout()
     plt.show()
@@ -129,5 +168,6 @@ def fill_missing_months(df_crimes_deprivation):
     df_filled['crime_count'] = df_filled['crime_count'].fillna(0)
 
     return df_filled
+
 
 prediction_network()
