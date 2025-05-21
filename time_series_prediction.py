@@ -4,6 +4,8 @@ from statsmodels.tsa.seasonal import seasonal_decompose
 import pandas as pd
 import matplotlib.pylab as plt
 import pmdarima as pm
+from tqdm import tqdm
+from joblib import Parallel, delayed
 
 
 def prediction_network():
@@ -15,29 +17,36 @@ def prediction_network():
     df_crime_month = fill_missing_months(df_crime_month)
 
     grouped = df_crime_month.groupby('LSOA_code')
-    for LSOA_code, group in grouped:
-        group['crime_diff'] = group['crime_count'].diff(periods=4)
-        group['crime_diff'].fillna(method='backfill', inplace=True)
 
-        ### Plot the graph comment out if not wanted ###
-        plot_trend_season_residual(LSOA_code, group)
+    results = Parallel(n_jobs=-1)(delayed(process_group)(code, group) for code, group in tqdm(grouped))
 
-        group['month_index'] = group.index.month
+    df_prediction = pd.DataFrame(results)
 
-        SARIMAX_model = pm.auto_arima(group[['crime_count']], exogenous=group[['month_index']],
-                                      start_p=1, start_q=1,
-                                      test='adf',
-                                      max_p=3, max_q=3, m=12,
-                                      start_P=0, seasonal=True,
-                                      d=None, D=1,
-                                      trace=False,
-                                      error_action='ignore',
-                                      suppress_warnings=True,
-                                      stepwise=True)
+    return df_prediction
 
-        sarimax_forecast(SARIMAX_model, group, LSOA_code, periods=4)
-        
+def process_group(LSOA_code, group):
+    group['crime_diff'] = group['crime_count'].diff(periods=4)
+    group['crime_diff'].fillna(method='backfill', inplace=True)
 
+    ### Plot the graph comment out if not wanted ###
+    # plot_trend_season_residual(LSOA_code, group)
+
+    group['month_index'] = group.index.month
+
+    SARIMAX_model = pm.auto_arima(group[['crime_count']], exogenous=group[['month_index']],
+                                  start_p=1, start_q=1,
+                                  test='adf',
+                                  max_p=3, max_q=3, m=12,
+                                  start_P=0, seasonal=True,
+                                  d=None, D=1,
+                                  trace=False,
+                                  error_action='ignore',
+                                  suppress_warnings=True,
+                                  stepwise=True)
+
+    fitted = sarimax_forecast(SARIMAX_model, group, LSOA_code, periods=4)
+
+    return LSOA_code, fitted
 
 def sarimax_forecast(SARIMAX_model, prediction_df, lsoa, periods):
     # Forecast
@@ -54,7 +63,9 @@ def sarimax_forecast(SARIMAX_model, prediction_df, lsoa, periods):
     index_of_fc = pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
 
     ### Plot the graph comment out if not wanted ###
-    forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa)
+    # forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa)
+
+    return fitted
 
 
 def forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa):
@@ -130,4 +141,5 @@ def fill_missing_months(df_crimes_deprivation):
 
     return df_filled
 
-prediction_network()
+df_prediction = prediction_network()
+print(df_prediction)
