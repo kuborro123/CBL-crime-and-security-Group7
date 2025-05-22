@@ -1,36 +1,23 @@
+import Data_loader as dl
+import Dataset_maker as dm
+import pandas as pd
 import glob
 import zipfile
 import os
 import geopandas as gpd
-import pandas as pd
 import matplotlib.pyplot as plt
 from shapely.geometry import Point
 from pulp import *
 from collections import defaultdict
 
+# Load burglary data
+burglaries = dm.burglaries_month_LSOA()  # Contains LSOA code and amount of burglaries per month
+print(burglaries)
 
-# Unzip the file
-with zipfile.ZipFile("/content/6fc4df964bdce6a513e3dabe49e4f16276169b3f.zip", 'r') as zip_ref:
-    zip_ref.extractall("/content/burglary_data")
-
-csv_files = glob.glob("/content/burglary_data/**/*.csv", recursive=True)
-print(f"Found {len(csv_files)} CSV files")
-print(csv_files[:3])  # preview a few
-
-"""###Importing London Wards ZIP file"""
-
-
-# --- 1. Define paths ---
-zip_path = "/content/London-wards-2018.zip"  # Replace with actual path
-extract_dir = "/tmp/ward_shapefile_extracted"
-
-# --- 2. Unzip ---
-with zipfile.ZipFile(zip_path, "r") as zip_ref:
-    zip_ref.extractall(extract_dir)
-
-# --- 3. Recursively find the .shp file ---
+# Loading the wards data
+wards_path = 'data/London-wards-2018'
 shp_path = None
-for root, dirs, files in os.walk(extract_dir):
+for root, dirs, files in os.walk(wards_path):
     for file in files:
         if file.endswith(".shp"):
             shp_path = os.path.join(root, file)
@@ -38,39 +25,19 @@ for root, dirs, files in os.walk(extract_dir):
     if shp_path:
         break
 
-assert shp_path is not None, "No .shp file found in the extracted ZIP."
-
-# --- 4. Load shapefile ---
 wards = gpd.read_file(shp_path)
-
-# --- 5. Rename columns if needed ---
 wards = wards.rename(columns={
     "GSS_CODE": "ward_code",
     "NAME": "ward_name"
 })
-
-# Optional: ensure proper CRS
 wards = wards.to_crs(epsg=4326)
+print("Wards ok")
 
-print("✅ Wards shapefile loaded successfully.")
+# Load LSOA shape data
+lsoa_shape_path = 'data/LB_LSOA2021_shp'
 
-"""###Importing LSOAs files"""
-
-
-
-# --- Step 1: Unzip main ZIP ---
-zip_path = "/content/LB_LSOA2021_shp.zip"  # Update if needed
-extracted_path = "/content/LSOA_unzipped"
-
-os.makedirs(extracted_path, exist_ok=True)
-
-with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-    zip_ref.extractall(extracted_path)
-
-# --- Step 2: Recursively search for and load all .shp files ---
 lsoa_gdfs = []
-
-for root, dirs, files in os.walk(extracted_path):
+for root, dirs, files in os.walk(lsoa_shape_path):
     for file in files:
         if file.endswith(".shp"):
             full_path = os.path.join(root, file)
@@ -78,15 +45,15 @@ for root, dirs, files in os.walk(extracted_path):
                 gdf = gpd.read_file(full_path).to_crs(epsg=4326)
                 lsoa_gdfs.append(gdf)
             except Exception as e:
-                print(f"❌ Error reading {file}: {e}")
+                print(f"Error reading {file}: {e}")
 
-# --- Step 3: Combine into a single GeoDataFrame ---
 lsoas = gpd.GeoDataFrame(pd.concat(lsoa_gdfs, ignore_index=True), crs="EPSG:4326")
-
-# --- Step 4: Set LSOA column name ---
 lsoa_col = "lsoa21cd" if "lsoa21cd" in lsoas.columns else lsoas.columns[0]
 
-print(f"✅ Loaded {len(lsoas)} LSOA polygons.")
+
+# Load crime data
+csv_files = glob.glob("data/crimedata/**/*.csv", recursive=True)  # Adjust the path to your main folder
+print(f"Found {len(csv_files)} CSV files")
 
 df_list = []
 
@@ -105,13 +72,12 @@ for file in csv_files:
 # Combine
 if df_list:
     combined_burglary_df = pd.concat(df_list, ignore_index=True)
-    # print(f"Combined burglary dataset shape: {combined_burglary_df.shape}")
+    print(combined_burglary_df)
 else:
     print("❌ No burglary records found in any file")
 
+# Allocation of police resources to LSOAs based on burglary data
 
-
-# --- 1. Load combined burglary dataset ---
 df = combined_burglary_df
 df = df[df["Crime type"].str.lower() == "burglary"]
 df = df.dropna(subset=["Longitude", "Latitude"])
