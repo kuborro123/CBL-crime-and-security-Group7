@@ -32,7 +32,7 @@ def burglaries_LSOA():
     FROM crimes
     where (Crime_type = 'burglary')
     group by LSOA_code
-
+    
     '''
     return data_loader(query)
 

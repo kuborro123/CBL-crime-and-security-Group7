@@ -10,6 +10,7 @@ from joblib import Parallel, delayed
 
 def prediction_network():
     df_crime_month = burglaries_month_LSOA()
+
     df_crime_month['month'] = pd.to_datetime(df_crime_month['month'], infer_datetime_format=True)
     df_crime_month = df_crime_month.set_index(['month'])
     df_crime_month = fill_missing_months(df_crime_month)
