@@ -19,17 +19,15 @@ def prediction_network():
     grouped = df_crime_month.groupby('LSOA_code')
 
     results = Parallel(n_jobs=-1)(delayed(process_group)(code, group) for code, group in tqdm(grouped))
-
-    df_prediction = pd.DataFrame(results)
+    df_prediction = pd.DataFrame(results, columns=['LSOA_code', 'predicted_value'])
+    df_prediction['predicted_value'] = df_prediction['predicted_value'].apply(lambda x: x[0])
+    df_prediction['predicted_value'] = df_prediction['predicted_value'].apply(lambda x: format(x, 'f'))
 
     return df_prediction
 
 def process_group(LSOA_code, group):
     group['crime_diff'] = group['crime_count'].diff(periods=4)
     group['crime_diff'].fillna(method='backfill', inplace=True)
-
-    ### Plot the graph comment out if not wanted ###
-    # plot_trend_season_residual(LSOA_code, group)
 
     group['month_index'] = group.index.month
 
@@ -44,9 +42,9 @@ def process_group(LSOA_code, group):
                                   suppress_warnings=True,
                                   stepwise=True)
 
-    fitted = sarimax_forecast(SARIMAX_model, group, LSOA_code, periods=4)
+    fitted = sarimax_forecast(SARIMAX_model, group, LSOA_code, periods=1)
 
-    return LSOA_code, fitted
+    return LSOA_code, fitted.values
 
 def sarimax_forecast(SARIMAX_model, prediction_df, lsoa, periods):
     # Forecast
@@ -60,68 +58,8 @@ def sarimax_forecast(SARIMAX_model, prediction_df, lsoa, periods):
     fitted, confint = SARIMAX_model.predict(n_periods=n_periods,
                                             return_conf_int=True,
                                             exogenous=forecast_df[['month_index']])
-    index_of_fc = pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
-
-    ### Plot the graph comment out if not wanted ###
-    # forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa)
 
     return fitted
-
-
-def forcast_plot(fitted, confint, index_of_fc, prediction_df, lsoa):
-    # make series for plotting purpose
-    fitted_series = pd.Series(fitted, index=index_of_fc)
-    lower_series = pd.Series(confint[:, 0], index=index_of_fc)
-    upper_series = pd.Series(confint[:, 1], index=index_of_fc)
-    fitted_series[fitted_series < 0] = 0
-    lower_series[lower_series < 0] = 0
-    upper_series[upper_series < 0] = 0
-    # Plot
-    plt.figure(figsize=(15, 7))
-    plt.plot(prediction_df['crime_count'], color='#1f76b4')
-    plt.plot(fitted_series, color='darkgreen')
-    plt.fill_between(lower_series.index,
-                     lower_series,
-                     upper_series,
-                     color='k', alpha=.15)
-
-    plt.title(f'SARIMAX - Forecast of LSOA: {lsoa}')
-    plt.show()
-
-
-
-def plot_trend_season_residual(LSOA_code, group):
-    result = seasonal_decompose(group['crime_count'], model='additive', period=4)
-    trend = result.trend.dropna()
-    seasonal = result.seasonal.dropna()
-    residual = result.resid.dropna()
-
-    # Plot the decomposed components
-    plt.figure(figsize=(6, 6))
-    plt.title(LSOA_code)
-
-    plt.subplot(4, 1, 1)
-    plt.plot(group['crime_count'], label='Original Series')
-    plt.legend()
-    plt.xticks(rotation=45)
-
-    plt.subplot(4, 1, 2)
-    plt.plot(trend, label='Trend')
-    plt.legend()
-    plt.xticks(rotation=45)
-
-    plt.subplot(4, 1, 3)
-    plt.plot(seasonal, label='Seasonal')
-    plt.legend()
-    plt.xticks(rotation=45)
-
-    plt.subplot(4, 1, 4)
-    plt.plot(residual, label='Residuals')
-    plt.legend()
-    plt.xticks(rotation=45)
-
-    plt.tight_layout()
-    plt.show()
 
 
 def fill_missing_months(df_crimes_deprivation):
