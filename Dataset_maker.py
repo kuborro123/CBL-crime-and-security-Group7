@@ -1,5 +1,6 @@
 from Data_loader import data_loader
 
+
 def burglaries_month_LSOA():
     """"
     selects the amount of burglaries that happend that month in every LSOA
@@ -11,6 +12,7 @@ def burglaries_month_LSOA():
     
     '''
     return data_loader(query)
+
 
 def get_deprivation_score():
     """
@@ -33,6 +35,17 @@ def burglaries_LSOA():
     where (Crime_type = 'burglary')
     group by LSOA_code
     
+    '''
+    return data_loader(query)
+
+
+def get_all_burglary_data():
+    """
+    selects all burglary data with LSOA code
+    """
+    query = '''SELECT*
+    FROM crimes
+    where (Crime_type = 'burglary')
     '''
     return data_loader(query)
 

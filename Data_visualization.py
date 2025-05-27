@@ -7,6 +7,9 @@ import os
 import matplotlib.cm as cm
 from matplotlib.colors import Normalize, LinearSegmentedColormap
 import contextily as ctx  
+from matplotlib.animation import FuncAnimation
+import math
+import random
 
 if not os.path.exists('visualizations'):
     os.makedirs('visualizations')
@@ -229,31 +232,69 @@ plt.savefig('visualizations/burglary_map_with_background.png', dpi=300)
 plt.show()
 
 # 11. Burglary heatmap with London map background
-plt.figure(figsize=(14, 12))
-
-colors = [(0, 0, 0, 0), (1, 0.1, 0, 0.9)]  
-cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
+#plt.figure(figsize=(14, 12))
+fig, ax = plt.subplots(figsize=(14, 12))
+#colors = [(0, 0, 0, 0), (1, 0.1, 0, 1)]  
+#cmap = LinearSegmentedColormap.from_list("custom_cmap", colors)
 
 heatmap, xedges, yedges = np.histogram2d(
     burglary_london['Longitude'], burglary_london['Latitude'], 
-    bins=75, range=[
-        [london_bounds[0], london_bounds[1]], 
-        [london_bounds[2], london_bounds[3]]
+    bins=25, range=[
+        [-0.25, 0.05], 
+        [51.45, 51.60]
     ]
 )
+# Create a modified version for animation
+animated_heatmap = heatmap.copy()
 extent = [xedges[0], xedges[-1], yedges[0], yedges[-1]]
+# Initial heatmap display
+im = ax.imshow(animated_heatmap.T, extent=extent, origin='lower', cmap='Reds', alpha=0.7, aspect='auto')
+plt.colorbar(im, ax=ax, label='burglary amount')
 
-plt.imshow(heatmap.T, extent=extent, origin='lower', cmap='Reds', alpha=0.7, aspect='auto')
+# Set titles
+ax.set_title('Burglary Density in London', fontsize=18)
+ax.set_xlabel('longitude', fontsize=14)
+ax.set_ylabel('latitude', fontsize=14)
 
-ctx.add_basemap(plt.gca(), crs="EPSG:4326", source=ctx.providers.CartoDB.Positron, alpha=0.8)
+# Animation function with individual cell flashing
+def update(frame):
+    # Create a copy of the original heatmap
+    animated_heatmap = heatmap.copy()
+    
+    # Only modify cells with actual data
+    for i in range(heatmap.shape[0]):
+        for j in range(heatmap.shape[1]):
+            if heatmap[i, j] > 0:
+                # Random chance for each cell to flash
+                if random.random() < 0.2:  # 20% chance for a cell to flash
+                    # Enhance the value for flashing
+                    animated_heatmap[i, j] = heatmap[i, j] * (1.5 + random.random())
+    
+    # Update the heatmap image
+    im.set_array(animated_heatmap.T)
+    
+    return [im]
 
-plt.colorbar(label='burglary amount')
-plt.title('Burglary Density in London', fontsize=18)
-plt.xlabel('longitude', fontsize=14)
-plt.ylabel('latitude', fontsize=14)
+# Create the animation (100 frames)
+anim = FuncAnimation(fig, update, frames=100, interval=100, blit=True)
+
+# Save as GIF
+anim.save('visualizations/burglary_heatmap_animated.gif', 
+          writer='pillow', fps=10, dpi=150)
+
 plt.tight_layout()
-plt.savefig('visualizations/burglary_heatmap_with_background.png', dpi=300)
-plt.show()
+plt.close()
+#plt.imshow(heatmap.T, extent=extent, origin='lower', cmap='Reds', alpha=0.7, aspect='auto')
+
+#ctx.add_basemap(plt.gca(), crs="EPSG:4326", source=ctx.providers.CartoDB.Positron, alpha=0.8)
+
+#plt.colorbar(label='burglary amount')
+#plt.title('Burglary Density in London', fontsize=18)
+#plt.xlabel('longitude', fontsize=14)
+#plt.ylabel('latitude', fontsize=14)
+#plt.tight_layout()
+#plt.savefig('visualizations/burglary_heatmap_with_background.png', dpi=300)
+#plt.show()
 
 # 12. Distribution of burglary cases in each LSOA area
 plt.figure(figsize=(16, 10))
