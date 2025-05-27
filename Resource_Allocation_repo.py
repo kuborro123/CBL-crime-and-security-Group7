@@ -10,6 +10,7 @@ from shapely.geometry import Point
 from pulp import *
 from collections import defaultdict
 from Dataset_maker import get_all_burglary_data
+# place for the import of the necessary function from the prediction model
 
 # Constants
 WARDS_PATH = 'data/London-wards-2018'
@@ -68,6 +69,9 @@ def plot_burglary_data(lsoas, gdf):
 
 
 def setup_linear_program(lsoa_list, normalized_risk, ward_to_lsoas, max_hours_per_ward):
+    """
+    Set up the linear programming problem to allocate officer hours to LSOAs based on burglary risk.
+    """
     prob = LpProblem("BurglaryLSOAAllocation", LpMaximize)
     x = {lsoa: LpVariable(f"x_{lsoa}", lowBound=0) for lsoa in lsoa_list}
     prob += lpSum(normalized_risk[lsoa] * x[lsoa] for lsoa in lsoa_list)
@@ -78,49 +82,58 @@ def setup_linear_program(lsoa_list, normalized_risk, ward_to_lsoas, max_hours_pe
     return prob, x
 
 
-# Get the geo information of the wards and the lsoa's plus the burglary data
+
 wards = find_london_wards(WARDS_PATH)
 lsoas, lsoa_col = load_lsoa_data(LSOA_SHAPE_PATH)
 df = get_all_burglary_data()
 df = df.dropna(subset=["Longitude", "Latitude"])
 
-# Convert the dataframe from the burglary data into a GeoDataFrame based on the longitude and latitude columns
+# Convert the burglary DataFrame into a GeoDataFrame using longitude and latitude
 geometry = [Point(xy) for xy in zip(df["Longitude"], df["Latitude"])]
 gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
 
+# Filter burglary data to include only points within the LSOA boundaries
 london_union = lsoas.unary_union
 gdf = gdf[gdf.geometry.within(london_union)]
 
-# Column names for LSOA and ward
+# Define column names for LSOA and ward
 lsoa_col = "lsoa21cd"
 ward_col = "lad22nm"
 
+# Spatially join burglary data with LSOA boundaries to associate each burglary with an LSOA and ward
 gdf_with_lsoa = gpd.sjoin(gdf, lsoas[[lsoa_col, ward_col, "geometry"]], how="inner", predicate="within")
+
+# Calculate burglary risk scores by counting the number of burglaries per LSOA and ward
 risk_by_lsoa = gdf_with_lsoa.groupby([lsoa_col, ward_col]).size().reset_index(name="risk_score")
 
-# Build mappings
+# Build a list of LSOA codes
 lsoa_list = risk_by_lsoa[lsoa_col].tolist()
+
+# Create a dictionary mapping each LSOA to its risk score
 risk_dict = dict(zip(risk_by_lsoa[lsoa_col], risk_by_lsoa["risk_score"]))
+
+# Create a dictionary mapping each LSOA to its corresponding ward
 lsoa_to_ward = dict(zip(risk_by_lsoa[lsoa_col], risk_by_lsoa[ward_col]))
 
-# Group LSOAs by ward
+# Group LSOAs by ward into a dictionary
 ward_to_lsoas = defaultdict(list)
 for lsoa, ward in lsoa_to_ward.items():
     ward_to_lsoas[ward].append(lsoa)
 
-# Normalize burglary risk
+# Normalize burglary risk scores to calculate the proportion of total risk for each LSOA
 total_risk = sum(risk_dict.values())
 normalized_risk = {lsoa: risk_dict[lsoa] / total_risk for lsoa in lsoa_list}
 
-# Set up and solve the linear programming problem
+# Set up and solve the linear programming problem to allocate officer hours to LSOAs
 prob, x = setup_linear_program(lsoa_list, normalized_risk, ward_to_lsoas, MAX_HOURS_PER_WARD)
 prob.solve()
 
-# Output the results
+# Output the results of the officer-hour allocation
 print("\n✅ Optimal officer-hour allocation by LSOA (per week):")
 for lsoa in lsoa_list:
     hours = x[lsoa].value()
     if hours and hours > 0:
         print(f"- {lsoa} ({lsoa_to_ward[lsoa]}): {hours:.1f} hours (risk: {risk_dict[lsoa]})")
 
+# Plot burglary data on a map with LSOA boundaries
 plot_burglary_data(lsoas, gdf)
