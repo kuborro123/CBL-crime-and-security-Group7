@@ -9,6 +9,10 @@ from joblib import Parallel, delayed
 
 
 def prediction_network():
+    '''
+    :return: df_prediction: The final dataframe with LSOA_code and a prediction of crimes in the comming month.
+    '''
+    # Get the data.
     df_crime_month = burglaries_month_LSOA()
 
     df_crime_month['month'] = pd.to_datetime(df_crime_month['month'], infer_datetime_format=True)
@@ -16,9 +20,14 @@ def prediction_network():
 
     df_crime_month = fill_missing_months(df_crime_month)
 
+    # Group the data by LSOA.
     grouped = df_crime_month.groupby('LSOA_code')
 
+    # Run all groups in parallel how many at a time depends on your pc. Change n_jobs to a number if you do not want to
+    # use all your logical processors. n_jobs=-1 for full use.
     results = Parallel(n_jobs=-1)(delayed(process_group)(code, group) for code, group in tqdm(grouped))
+
+    # Put the prediction into a dataframe we can use.
     df_prediction = pd.DataFrame(results, columns=['LSOA_code', 'predicted_value'])
     df_prediction['predicted_value'] = df_prediction['predicted_value'].apply(lambda x: x[0])
     df_prediction['predicted_value'] = df_prediction['predicted_value'].apply(lambda x: format(x, 'f'))
@@ -26,11 +35,19 @@ def prediction_network():
     return df_prediction
 
 def process_group(LSOA_code, group):
+    '''
+    :param LSOA_code: The code for the LSOA.
+    :param group: The group with all months of 1 LSOA used for prediction.
+    :return: LSOA_code: The code for the LSOA.
+    :return: fitted.values: the values of the prediction.
+    '''
+    # Change the group dataframe to the right format.
     group['crime_diff'] = group['crime_count'].diff(periods=4)
     group['crime_diff'].fillna(method='backfill', inplace=True)
 
     group['month_index'] = group.index.month
 
+    # Define the model.
     SARIMAX_model = pm.auto_arima(group[['crime_count']], exogenous=group[['month_index']],
                                   start_p=1, start_q=1,
                                   test='adf',
@@ -42,16 +59,21 @@ def process_group(LSOA_code, group):
                                   suppress_warnings=True,
                                   stepwise=True)
 
-    fitted = sarimax_forecast(SARIMAX_model, group, LSOA_code, periods=1)
+    # Predict.
+    fitted = sarimax_forecast(SARIMAX_model, group, periods=1)
 
     return LSOA_code, fitted.values
 
-def sarimax_forecast(SARIMAX_model, prediction_df, lsoa, periods):
+def sarimax_forecast(SARIMAX_model, prediction_df, periods):
+    '''
+    :param SARIMAX_model: The model.
+    :param prediction_df: The dataframe that should be predicted.
+    :param periods: Number of periods that should be predicted.
+    :return: A dataframe with the predicted value(s).
+    '''
     # Forecast
-    n_periods = periods
-
     forecast_df = pd.DataFrame(
-            {'month_index': pd.date_range(prediction_df.index[-1], periods=n_periods, freq='MS').month},
+            {'month_index': pd.date_range(prediction_df.index[-1], periods=periods, freq='MS').month},
                     index=pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
                 )
 
@@ -62,18 +84,25 @@ def sarimax_forecast(SARIMAX_model, prediction_df, lsoa, periods):
     return fitted
 
 
-def fill_missing_months(df_crimes_deprivation):
-    full_index = pd.date_range(start=df_crimes_deprivation.index.min(), end=df_crimes_deprivation.index.max(),
+def fill_missing_months(df_crimes_month):
+    '''
+    :param df_crimes_month: The dataframe with the number of crimes per month per LSOA.
+    :return: df_filled: Same dataframe but with all missing months filled with 0.
+    '''
+    # define the full index per LSOA
+    full_index = pd.date_range(start=df_crimes_month.index.min(), end=df_crimes_month.index.max(),
                                freq='MS')
-    grouped = df_crimes_deprivation.groupby('LSOA_code')
+    grouped = df_crimes_month.groupby('LSOA_code')
     filled_dfs = []
 
+    # Sort per LSOA
     for LSOA_code, group in grouped:
         group = group.sort_index()
         group_reindexed = group.reindex(full_index)
         group_reindexed['LSOA_code'] = LSOA_code
         filled_dfs.append(group_reindexed)
 
+    # Fill the missing months
     df_filled = pd.concat(filled_dfs)
     df_filled['crime_count'] = df_filled['crime_count'].fillna(0)
 
