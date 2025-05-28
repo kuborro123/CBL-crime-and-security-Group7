@@ -15,7 +15,7 @@ def prediction_network():
     # Get the data.
     df_crime_month = burglaries_month_LSOA()
 
-    df_crime_month['month'] = pd.to_datetime(df_crime_month['month'], infer_datetime_format=True)
+    df_crime_month['month'] = pd.to_datetime(df_crime_month['month'])
     df_crime_month = df_crime_month.set_index(['month'])
 
     df_crime_month = fill_missing_months(df_crime_month)
@@ -41,28 +41,32 @@ def process_group(LSOA_code, group):
     :return: LSOA_code: The code for the LSOA.
     :return: fitted.values: the values of the prediction.
     '''
-    # Change the group dataframe to the right format.
-    group['crime_diff'] = group['crime_count'].diff(periods=4)
-    group['crime_diff'].fillna(method='backfill', inplace=True)
+    try:
+        # Change the group dataframe to the right format.
+        group['crime_diff'] = group['crime_count'].diff(periods=4)
+        group['crime_diff'].bfill(inplace=True)  # Backfill to fill NaN values
 
-    group['month_index'] = group.index.month
+        group['month_index'] = group.index.month
 
-    # Define the model.
-    SARIMAX_model = pm.auto_arima(group[['crime_count']], exogenous=group[['month_index']],
-                                  start_p=1, start_q=1,
-                                  test='adf',
-                                  max_p=3, max_q=3, m=12,
-                                  start_P=0, seasonal=True,
-                                  d=None, D=1,
-                                  trace=False,
-                                  error_action='ignore',
-                                  suppress_warnings=True,
-                                  stepwise=True)
+        # Define the model.
+        SARIMAX_model = pm.auto_arima(group[['crime_count']], exogenous=group[['month_index']],
+                                      start_p=1, start_q=1,
+                                      test='adf',
+                                      max_p=3, max_q=3, m=12,
+                                      start_P=0, seasonal=True,
+                                      d=None, D=1,
+                                      trace=False,
+                                      error_action='ignore',
+                                      suppress_warnings=True,
+                                      stepwise=True)
 
-    # Predict.
-    fitted = sarimax_forecast(SARIMAX_model, group, periods=1)
+        # Predict.
+        fitted = sarimax_forecast(SARIMAX_model, group, periods=1)
 
-    return LSOA_code, fitted.values
+        return LSOA_code, fitted.values
+
+    except Exception as e:
+        return LSOA_code, [0]  # Return 0 if there is an error in the prediction
 
 def sarimax_forecast(SARIMAX_model, prediction_df, periods):
     '''
@@ -74,10 +78,10 @@ def sarimax_forecast(SARIMAX_model, prediction_df, periods):
     # Forecast
     forecast_df = pd.DataFrame(
             {'month_index': pd.date_range(prediction_df.index[-1], periods=periods, freq='MS').month},
-                    index=pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
+                    index=pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=periods, freq='MS')
                 )
 
-    fitted, confint = SARIMAX_model.predict(n_periods=n_periods,
+    fitted, confint = SARIMAX_model.predict(n_periods=periods,
                                             return_conf_int=True,
                                             exogenous=forecast_df[['month_index']])
 
