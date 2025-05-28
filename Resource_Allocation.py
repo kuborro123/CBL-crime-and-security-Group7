@@ -1,197 +1,139 @@
+import Data_loader as dl
+import Dataset_maker as dm
+import pandas as pd
 import glob
 import zipfile
 import os
 import geopandas as gpd
-import pandas as pd
 import matplotlib.pyplot as plt
 from shapely.geometry import Point
 from pulp import *
 from collections import defaultdict
+from Dataset_maker import get_all_burglary_data
+# place for the import of the necessary function from the prediction model
+
+# Constants
+WARDS_PATH = 'data/London-wards-2018'
+LSOA_SHAPE_PATH = 'data/LB_LSOA2021_shp'
+MAX_HOURS_PER_WARD = 800
 
 
-# Unzip the file
-with zipfile.ZipFile("/content/6fc4df964bdce6a513e3dabe49e4f16276169b3f.zip", 'r') as zip_ref:
-    zip_ref.extractall("/content/burglary_data")
-
-csv_files = glob.glob("/content/burglary_data/**/*.csv", recursive=True)
-print(f"Found {len(csv_files)} CSV files")
-print(csv_files[:3])  # preview a few
-
-"""###Importing London Wards ZIP file"""
-
-
-# --- 1. Define paths ---
-zip_path = "/content/London-wards-2018.zip"  # Replace with actual path
-extract_dir = "/tmp/ward_shapefile_extracted"
-
-# --- 2. Unzip ---
-with zipfile.ZipFile(zip_path, "r") as zip_ref:
-    zip_ref.extractall(extract_dir)
-
-# --- 3. Recursively find the .shp file ---
-shp_path = None
-for root, dirs, files in os.walk(extract_dir):
-    for file in files:
-        if file.endswith(".shp"):
-            shp_path = os.path.join(root, file)
+def find_london_wards(wards_path):
+    shp_path = None
+    for root, dirs, files in os.walk(wards_path):
+        for file in files:
+            if file.endswith(".shp"):
+                shp_path = os.path.join(root, file)
+                break
+        if shp_path:
             break
-    if shp_path:
-        break
 
-assert shp_path is not None, "No .shp file found in the extracted ZIP."
-
-# --- 4. Load shapefile ---
-wards = gpd.read_file(shp_path)
-
-# --- 5. Rename columns if needed ---
-wards = wards.rename(columns={
-    "GSS_CODE": "ward_code",
-    "NAME": "ward_name"
-})
-
-# Optional: ensure proper CRS
-wards = wards.to_crs(epsg=4326)
-
-print("✅ Wards shapefile loaded successfully.")
-
-"""###Importing LSOAs files"""
+    wards = gpd.read_file(shp_path)
+    wards = wards.rename(columns={
+        "GSS_CODE": "ward_code",
+        "NAME": "ward_name"
+    })
+    wards = wards.to_crs(epsg=4326)
+    return wards
 
 
+def load_lsoa_data(lsoa_shape_path):
+    lsoa_gdfs = []
+    for root, dirs, files in os.walk(lsoa_shape_path):
+        for file in files:
+            if file.endswith(".shp"):
+                full_path = os.path.join(root, file)
+                try:
+                    gdf = gpd.read_file(full_path).to_crs(epsg=4326)
+                    lsoa_gdfs.append(gdf)
+                except Exception as e:
+                    print(f"Error reading {file}: {e}")
 
-# --- Step 1: Unzip main ZIP ---
-zip_path = "/content/LB_LSOA2021_shp.zip"  # Update if needed
-extracted_path = "/content/LSOA_unzipped"
+    lsoas = gpd.GeoDataFrame(pd.concat(lsoa_gdfs, ignore_index=True), crs="EPSG:4326")
+    lsoa_col = "lsoa21cd" if "lsoa21cd" in lsoas.columns else lsoas.columns[0]
+    return lsoas, lsoa_col
 
-os.makedirs(extracted_path, exist_ok=True)
 
-with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-    zip_ref.extractall(extracted_path)
+def plot_burglary_data(lsoas, gdf):
+    """
+    Plot burglary locations and LSOA boundaries.
+    Args:
+        lsoas (GeoDataFrame): GeoDataFrame containing LSOA boundaries.
+        gdf (GeoDataFrame): GeoDataFrame containing burglary locations.
+    """
+    fig, ax = plt.subplots(figsize=(10, 10))
+    lsoas.plot(ax=ax, facecolor='none', edgecolor='gray', linewidth=0.5)
+    gdf.plot(ax=ax, color='red', markersize=1, alpha=0.5)
+    plt.title("Burglary Locations vs LSOA Boundaries")
+    plt.show()
 
-# --- Step 2: Recursively search for and load all .shp files ---
-lsoa_gdfs = []
 
-for root, dirs, files in os.walk(extracted_path):
-    for file in files:
-        if file.endswith(".shp"):
-            full_path = os.path.join(root, file)
-            try:
-                gdf = gpd.read_file(full_path).to_crs(epsg=4326)
-                lsoa_gdfs.append(gdf)
-            except Exception as e:
-                print(f"❌ Error reading {file}: {e}")
+def setup_linear_program(lsoa_list, normalized_risk, ward_to_lsoas, max_hours_per_ward):
+    """
+    Set up the linear programming problem to allocate officer hours to LSOAs based on burglary risk.
+    """
+    prob = LpProblem("BurglaryLSOAAllocation", LpMaximize)
+    x = {lsoa: LpVariable(f"x_{lsoa}", lowBound=0) for lsoa in lsoa_list}
+    prob += lpSum(normalized_risk[lsoa] * x[lsoa] for lsoa in lsoa_list)
 
-# --- Step 3: Combine into a single GeoDataFrame ---
-lsoas = gpd.GeoDataFrame(pd.concat(lsoa_gdfs, ignore_index=True), crs="EPSG:4326")
+    for ward, lsoas_in_ward in ward_to_lsoas.items():
+        prob += lpSum(x[lsoa] for lsoa in lsoas_in_ward) <= max_hours_per_ward
 
-# --- Step 4: Set LSOA column name ---
-lsoa_col = "lsoa21cd" if "lsoa21cd" in lsoas.columns else lsoas.columns[0]
-
-print(f"✅ Loaded {len(lsoas)} LSOA polygons.")
-
-df_list = []
-
-for file in csv_files:
-    df = pd.read_csv(file)
-
-    if "Crime type" not in df.columns:
-        # print(f"Skipping {file} — missing 'Crime type'")
-        continue
-
-    df_burglary = df[df["Crime type"].str.lower() == "burglary"]
-
-    if not df_burglary.empty:
-        df_list.append(df_burglary)
-
-# Combine
-if df_list:
-    combined_burglary_df = pd.concat(df_list, ignore_index=True)
-    # print(f"Combined burglary dataset shape: {combined_burglary_df.shape}")
-else:
-    print("❌ No burglary records found in any file")
+    return prob, x
 
 
 
-# --- 1. Load combined burglary dataset ---
-df = combined_burglary_df
-df = df[df["Crime type"].str.lower() == "burglary"]
+wards = find_london_wards(WARDS_PATH)
+lsoas, lsoa_col = load_lsoa_data(LSOA_SHAPE_PATH)
+df = get_all_burglary_data()
 df = df.dropna(subset=["Longitude", "Latitude"])
 
-# --- 2. Convert to GeoDataFrame ---
+# Convert the burglary DataFrame into a GeoDataFrame using longitude and latitude
 geometry = [Point(xy) for xy in zip(df["Longitude"], df["Latitude"])]
 gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:4326")
 
-# --- 3. Load LSOA shapefiles (assume `lsoas` already loaded and merged) ---
-lsoas = lsoas.to_crs(epsg=4326)  # Ensure matching CRS
-
-# --- 4. Filter burglary points to only those within Greater London ---
+# Filter burglary data to include only points within the LSOA boundaries
 london_union = lsoas.unary_union
 gdf = gdf[gdf.geometry.within(london_union)]
 
-# --- 5. Spatial join to assign burglaries to LSOAs ---
+# Define column names for LSOA and ward
 lsoa_col = "lsoa21cd"
-ward_col = "lad22nm"  # Local authority name (ward-level proxy)
+ward_col = "lad22nm"
 
+# Spatially join burglary data with LSOA boundaries to associate each burglary with an LSOA and ward
 gdf_with_lsoa = gpd.sjoin(gdf, lsoas[[lsoa_col, ward_col, "geometry"]], how="inner", predicate="within")
 
-# --- 6. Compute burglary risk per LSOA ---
+# Calculate burglary risk scores by counting the number of burglaries per LSOA and ward
 risk_by_lsoa = gdf_with_lsoa.groupby([lsoa_col, ward_col]).size().reset_index(name="risk_score")
 
-# --- Debug output ---
-print(f"✅ Total burglaries: {len(gdf)}")
-print(f"✅ Matched to LSOAs: {len(gdf_with_lsoa)}")
-print(f"✅ Unique LSOAs: {gdf_with_lsoa[lsoa_col].nunique()}")
-print(f"✅ Total risk entries: {len(risk_by_lsoa)}")
-
-# --- 7. Optimization model setup ---
-MAX_HOURS_PER_WARD = 800
-
-# Build mappings
+# Build a list of LSOA codes
 lsoa_list = risk_by_lsoa[lsoa_col].tolist()
+
+# Create a dictionary mapping each LSOA to its risk score
 risk_dict = dict(zip(risk_by_lsoa[lsoa_col], risk_by_lsoa["risk_score"]))
+
+# Create a dictionary mapping each LSOA to its corresponding ward
 lsoa_to_ward = dict(zip(risk_by_lsoa[lsoa_col], risk_by_lsoa[ward_col]))
 
-# Group LSOAs by ward
+# Group LSOAs by ward into a dictionary
 ward_to_lsoas = defaultdict(list)
 for lsoa, ward in lsoa_to_ward.items():
     ward_to_lsoas[ward].append(lsoa)
 
-# Normalize burglary risk
+# Normalize burglary risk scores to calculate the proportion of total risk for each LSOA
 total_risk = sum(risk_dict.values())
 normalized_risk = {lsoa: risk_dict[lsoa] / total_risk for lsoa in lsoa_list}
 
-# --- 8. Linear programming ---
-prob = LpProblem("BurglaryLSOAAllocation", LpMaximize)
-
-# Decision variables: officer-hours per LSOA
-x = {lsoa: LpVariable(f"x_{lsoa}", lowBound=0) for lsoa in lsoa_list}
-
-# Objective: maximize risk-weighted allocation
-prob += lpSum(normalized_risk[lsoa] * x[lsoa] for lsoa in lsoa_list)
-
-# Constraints: Max hours per ward
-for ward, lsoas_in_ward in ward_to_lsoas.items():
-    prob += lpSum(x[lsoa] for lsoa in lsoas_in_ward) <= MAX_HOURS_PER_WARD
-
-# --- 9. Solve ---
+# Set up and solve the linear programming problem to allocate officer hours to LSOAs
+prob, x = setup_linear_program(lsoa_list, normalized_risk, ward_to_lsoas, MAX_HOURS_PER_WARD)
 prob.solve()
 
-# --- 10. Output ---
+# Output the results of the officer-hour allocation
 print("\n✅ Optimal officer-hour allocation by LSOA (per week):")
 for lsoa in lsoa_list:
     hours = x[lsoa].value()
     if hours and hours > 0:
         print(f"- {lsoa} ({lsoa_to_ward[lsoa]}): {hours:.1f} hours (risk: {risk_dict[lsoa]})")
 
-print(lsoas.columns)
-print("Wards represented:", gdf_with_lsoa[ward_col].unique())
-
-
-# Plot all LSOAs
-fig, ax = plt.subplots(figsize=(10, 10))
-lsoas.plot(ax=ax, facecolor='none', edgecolor='gray', linewidth=0.5)
-
-# Plot burglary points
-gdf.plot(ax=ax, color='red', markersize=1, alpha=0.5)
-
-plt.title("Burglary Locations vs LSOA Boundaries")
-plt.show()
+# Plot burglary data on a map with LSOA boundaries
+plot_burglary_data(lsoas, gdf)
