@@ -10,6 +10,7 @@ from shapely.geometry import Point
 from pulp import *
 from collections import defaultdict
 from Dataset_maker import get_all_burglary_data
+from time_series_prediction import prediction_network
 # place for the import of the necessary function from the prediction model
 
 # Constants
@@ -17,6 +18,7 @@ WARDS_PATH = 'data/London-wards-2018'
 LSOA_SHAPE_PATH = 'data/LB_LSOA2021_shp'
 MAX_HOURS_PER_WARD = 800
 
+df_prediction = prediction_network()
 
 def find_london_wards(wards_path):
     shp_path = None
