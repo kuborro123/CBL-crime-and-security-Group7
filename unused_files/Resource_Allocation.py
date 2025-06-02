@@ -13,6 +13,10 @@ from Dataset_maker import get_all_burglary_data
 from time_series_prediction import prediction_network
 # place for the import of the necessary function from the prediction model
 
+'''
+This is old code, for the right code please go to Resourch_Allocation_repo.py
+'''
+
 # Constants
 WARDS_PATH = 'data/London-wards-2018'
 LSOA_SHAPE_PATH = 'data/LB_LSOA2021_shp'
