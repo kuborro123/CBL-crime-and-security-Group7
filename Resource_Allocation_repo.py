@@ -11,6 +11,9 @@ from pulp import *
 from collections import defaultdict
 from Dataset_maker import get_all_burglary_data
 import numpy as np
+from time_series_prediction import prediction_network
+
+
 # place for the import of the necessary function from the prediction model
 
 
@@ -93,11 +96,10 @@ ward_col = "lad22nm"
 wards = find_london_wards(WARDS_PATH)
 lsoas, lsoa_col = load_lsoa_data(LSOA_SHAPE_PATH)
 
+lsoa_predicted_risk_score = prediction_network()
+print(lsoa_predicted_risk_score)
 
-
-lsoas_risk_score = ('Place holder string for now assume it is a dataframe with an '
-                    'LSOAcod collumn and a risk score collumn')
-
+"""
 np.random.seed(42)  # For reproducibility
 mock_risk_scores = pd.DataFrame({
     "lsoa21cd": lsoas["lsoa21cd"],
@@ -106,8 +108,11 @@ mock_risk_scores = pd.DataFrame({
 
 mock_risk_scores = mock_risk_scores.set_index("lsoa21cd")["risk_score"]
 
+"""
+
+
 # Merge risk scores with LSOA data
-lsoas["risk_score"] = lsoas["lsoa21cd"].map(mock_risk_scores)
+lsoas["risk_score"] = lsoas["lsoa21cd"].map(lsoa_predicted_risk_score)
 
 # Assign LSOA codes to wards and group lsoa by ward
 lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
