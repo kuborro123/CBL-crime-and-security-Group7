@@ -112,5 +112,5 @@ def fill_missing_months(df_crimes_month):
 
     return df_filled
 
-df_prediction = prediction_network()
-print(df_prediction)
+if __name__ == '__main__':
+    print(prediction_network())

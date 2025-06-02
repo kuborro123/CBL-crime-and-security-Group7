@@ -11,8 +11,8 @@ from matplotlib.animation import FuncAnimation
 import math
 import random
 
-if not os.path.exists('visualizations'):
-    os.makedirs('visualizations')
+if not os.path.exists('../visualizations'):
+    os.makedirs('../visualizations')
 
 query = "SELECT * FROM crimes " 
 df_crimes = data_loader(query)
