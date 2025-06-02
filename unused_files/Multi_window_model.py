@@ -12,6 +12,10 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 import itertools
 import warnings
 warnings.filterwarnings('ignore')
+'''
+A testing file for the right perameters of the sarimax model.
+See time_series_prediction.py for the actual model.
+'''
 
 
 def burglaries_month_LSOA():
