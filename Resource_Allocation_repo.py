@@ -13,7 +13,6 @@ from Dataset_maker import get_all_burglary_data
 import numpy as np
 from time_series_prediction import prediction_network
 
-
 # place for the import of the necessary function from the prediction model
 
 
@@ -62,32 +61,72 @@ def load_lsoa_data(lsoa_shape_path):
     return lsoas, lsoa_col
 
 
-def plot_burglary_data(lsoas, gdf):
-    """
-    Plot burglary locations and LSOA boundaries.
-    Args:
-        lsoas (GeoDataFrame): GeoDataFrame containing LSOA boundaries.
-        gdf (GeoDataFrame): GeoDataFrame containing burglary locations.
-    """
-    fig, ax = plt.subplots(figsize=(10, 10))
-    lsoas.plot(ax=ax, facecolor='none', edgecolor='gray', linewidth=0.5)
-    gdf.plot(ax=ax, color='red', markersize=1, alpha=0.5)
-    plt.title("Burglary Locations vs LSOA Boundaries")
-    plt.show()
-
-
-def setup_linear_program(lsoa_list, normalized_risk, ward_to_lsoas, max_hours_per_ward):
-    """
-    Set up the linear programming problem to allocate officer hours to LSOAs based on burglary risk.
-    """
-    prob = LpProblem("BurglaryLSOAAllocation", LpMaximize)
-    x = {lsoa: LpVariable(f"x_{lsoa}", lowBound=0) for lsoa in lsoa_list}
-    prob += lpSum(normalized_risk[lsoa] * x[lsoa] for lsoa in lsoa_list)
+def allocate_resources(lsoas, ward_to_lsoas, lsoa_col):
+    allocation_results = []
 
     for ward, lsoas_in_ward in ward_to_lsoas.items():
-        prob += lpSum(x[lsoa] for lsoa in lsoas_in_ward) <= max_hours_per_ward
+        # Collect raw risk scores for all LSOAs in this ward
+        ward_lsoa_rows = lsoas[lsoas[lsoa_col].isin(lsoas_in_ward)]
+        total_risk_in_ward = ward_lsoa_rows["risk_score"].sum()
 
-    return prob, x
+        # If total risk is zero, assign zero officers/hours to every LSOA
+        if total_risk_in_ward == 0:
+            for lsoa in lsoas_in_ward:
+                allocation_results.append({
+                    "ward": ward,
+                    "lsoa": lsoa,
+                    "risk_score": 0,
+                    "patrol_hours": 0,
+                    "officers_allocated": 0
+                })
+            continue
+
+        # Compute each LSOA's normalized risk and fractional officers
+        frac_officers = {}
+        for lsoa in lsoas_in_ward:
+            risk_score = float(lsoas.loc[lsoas[lsoa_col] == lsoa, "risk_score"])
+            normalized = risk_score / total_risk_in_ward
+            frac_officers[lsoa] = normalized * MAX_OFFICERS_PER_WARD
+
+        # Take floor of each fractional value and record the remainder
+        floor_officers = {}
+        remainders = {}
+        for lsoa, frac_val in frac_officers.items():
+            f = int(np.floor(frac_val))
+            floor_officers[lsoa] = f
+            remainders[lsoa] = frac_val - f
+
+        # See how many officers remain to be assigned
+        assigned_floor_sum = sum(floor_officers.values())
+        remaining_officers = MAX_OFFICERS_PER_WARD - assigned_floor_sum
+
+        # Distribute the remaining officers to the LSOAs with largest remainders
+        sorted_by_remainder = sorted(
+            remainders.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        extra_officer = {lsoa: 0 for lsoa in lsoas_in_ward}
+        for i in range(remaining_officers):
+            lsoa_to_boost = sorted_by_remainder[i][0]
+            extra_officer[lsoa_to_boost] = 1
+
+        # Build final integer allocations
+        for lsoa in lsoas_in_ward:
+            base = floor_officers[lsoa]
+            extra = extra_officer[lsoa]
+            officers_int = base + extra
+            hours_int = officers_int * MAX_PATROL_HOURS_PER_OFFICER
+
+            allocation_results.append({
+                "ward": ward,
+                "lsoa": lsoa,
+                "risk_score": float(lsoas.loc[lsoas[lsoa_col] == lsoa, "risk_score"]),
+                "patrol_hours": hours_int,
+                "officers_allocated": officers_int
+            })
+
+    return pd.DataFrame(allocation_results)
 
 
 # Define column names for LSOA and ward
@@ -97,7 +136,25 @@ wards = find_london_wards(WARDS_PATH)
 lsoas, lsoa_col = load_lsoa_data(LSOA_SHAPE_PATH)
 
 lsoa_predicted_risk_score = prediction_network()
-print(lsoa_predicted_risk_score)
+lsoa_predicted_risk_score = lsoa_predicted_risk_score.rename(columns={"LSOA_code": "lsoa21cd",
+                                                                      "predicted_value": "risk_score"})
+
+lsoa_predicted_risk_score = lsoa_predicted_risk_score.set_index("lsoa21cd")["risk_score"].to_dict()
+
+# Merge risk scores with LSOA data
+lsoas["risk_score"] = lsoas["lsoa21cd"].map(lsoa_predicted_risk_score)
+lsoas["risk_score"] = pd.to_numeric(lsoas["risk_score"], errors="coerce")
+lsoas["risk_score"].fillna(0, inplace=True)
+
+# Assign LSOA codes to wards and group lsoa by ward
+lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
+ward_to_lsoas = lsoas_with_wards.groupby(ward_col)[lsoa_col].apply(list).to_dict()
+
+allocation_df = allocate_resources(lsoas, ward_to_lsoas, lsoa_col)
+
+# Output the allocation results
+print("\n✅ Officer Allocation Results:")
+print(allocation_df)
 
 """
 np.random.seed(42)  # For reproducibility
@@ -109,44 +166,3 @@ mock_risk_scores = pd.DataFrame({
 mock_risk_scores = mock_risk_scores.set_index("lsoa21cd")["risk_score"]
 
 """
-
-
-# Merge risk scores with LSOA data
-lsoas["risk_score"] = lsoas["lsoa21cd"].map(lsoa_predicted_risk_score)
-
-# Assign LSOA codes to wards and group lsoa by ward
-lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
-ward_to_lsoas = lsoas_with_wards.groupby(ward_col)[lsoa_col].apply(list).to_dict()
-
-# For each ward distribute patrol hours to LSOAs based on risk scores and proximity between LSOAs inside the ward
-# Allocate officers to LSOAs in each ward
-allocation_results = []
-
-# Iterate over ward_to_lsoas dictionary
-for ward, lsoas_in_ward in ward_to_lsoas.items():
-    # Get the total risk score for the ward
-    total_risk_in_ward = lsoas[lsoas[lsoa_col].isin(lsoas_in_ward)]["risk_score"].sum()
-
-    # Allocate patrol hours proportionally to risk scores
-    for lsoa in lsoas_in_ward:
-        lsoa_row = lsoas[lsoas[lsoa_col] == lsoa].iloc[0]
-        risk_score = lsoa_row["risk_score"]
-        normalized_risk = risk_score / total_risk_in_ward if total_risk_in_ward > 0 else 0
-        patrol_hours = normalized_risk * TOTAL_PATROL_HOURS_PER_WARD
-        officers_allocated = patrol_hours / MAX_PATROL_HOURS_PER_OFFICER
-
-        # Store the allocation result
-        allocation_results.append({
-            "ward": ward,
-            "lsoa": lsoa,
-            "risk_score": risk_score,
-            "patrol_hours": round(patrol_hours, 2),
-            "officers_allocated": int(officers_allocated)
-        })
-
-# Convert results to a DataFrame for easier analysis
-allocation_df = pd.DataFrame(allocation_results)
-
-# Output the allocation results
-print("\n✅ Officer Allocation Results:")
-print(allocation_df)
