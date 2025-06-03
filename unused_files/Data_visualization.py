@@ -14,7 +14,7 @@ import random
 if not os.path.exists('../visualizations'):
     os.makedirs('../visualizations')
 
-query = "SELECT * FROM crimes " 
+query = "SELECT * FROM crimes_complete "
 df_crimes = data_loader(query)
 
 print("data load done")
@@ -37,11 +37,11 @@ if 'Month' in df_crimes.columns:
 
 # 1. Crime type distribution visualization
 plt.figure(figsize=(14, 10))
-crime_counts = df_crimes['Crime type'].value_counts()
+crime_counts = df_crimes['Crime_type'].value_counts()
 sns.barplot(x=crime_counts.values, y=crime_counts.index, palette='viridis')
 plt.title('Crime type distribution in London', fontsize=18)
 plt.xlabel('amount', fontsize=14)
-plt.ylabel('crime type', fontsize=14)
+plt.ylabel('crime_type', fontsize=14)
 plt.grid(axis='x', linestyle='--', alpha=0.7)
 plt.tight_layout()
 plt.savefig('visualizations/crime_types.png')
@@ -91,7 +91,7 @@ if 'Month' in df_crimes.columns:
 
 # 4. Number of crimes reported by each police department
 plt.figure(figsize=(14, 8))
-reported_counts = df_crimes['Reported by'].value_counts()
+reported_counts = df_crimes['Reported_by'].value_counts()
 sns.barplot(x=reported_counts.values, y=reported_counts.index, palette='Blues_d')
 plt.title('Number of crimes reported by each police department', fontsize=18)
 plt.xlabel('amount', fontsize=14)
@@ -103,7 +103,7 @@ plt.show()
 
 # 5. Crime outcome classification
 plt.figure(figsize=(14, 10))
-outcome_counts = df_crimes['Last outcome category'].value_counts()
+outcome_counts = df_crimes['Last_outcome_category'].value_counts()
 # If there are too many result categories, only the first 10 will be displayed
 if len(outcome_counts) > 10:
     outcome_counts = outcome_counts.head(10)
@@ -152,7 +152,7 @@ plt.show()
 # 7. Crime amounts by LSOA area
 plt.figure(figsize=(16, 10))
 # Get the top 15 LSOA areas with the most crimes
-top_lsoa = df_crimes['LSOA name'].value_counts().head(15)
+top_lsoa = df_crimes['LSOA_name'].value_counts().head(15)
 sns.barplot(x=top_lsoa.values, y=top_lsoa.index, palette='viridis')
 plt.title('Crime-prone areas (top 15 LSOAs)', fontsize=18)
 plt.xlabel('crime amount', fontsize=14)
@@ -165,12 +165,12 @@ plt.show()
 # 8. Comparison of geographical distribution of different crime types with London map background
 plt.figure(figsize=(16, 12))
 # Get the top 6 most common crime types and set color
-top_crimes = df_crimes['Crime type'].value_counts().head(6).index.tolist()
+top_crimes = df_crimes['Crime_type'].value_counts().head(6).index.tolist()
 colors = ['red', 'blue', 'green', 'purple', 'orange', 'cyan']
 crime_color_map = dict(zip(top_crimes, colors))
 
 for crime, color in crime_color_map.items():
-    crime_data = df_crimes[df_crimes['Crime type'] == crime]
+    crime_data = df_crimes[df_crimes['Crime_type'] == crime]
     crime_data = crime_data.dropna(subset=['Longitude', 'Latitude'])
     crime_london_data = crime_data[
         (crime_data['Longitude'] >= london_bounds[0]) & (crime_data['Longitude'] <= london_bounds[1]) &
@@ -190,7 +190,7 @@ plt.savefig('visualizations/crime_types_map_with_background.png', dpi=300)
 plt.show()
 
 # ==== Burglary Analysis ====
-burglary_df = df_crimes[df_crimes['Crime type'] == 'Burglary']
+burglary_df = df_crimes[df_crimes['Crime_type'] == 'Burglary']
 print(f"Number of burglary cases: {len(burglary_df)}")
 
 # 9. Monthly trend analysis of burglary
@@ -298,7 +298,7 @@ plt.close()
 
 # 12. Distribution of burglary cases in each LSOA area
 plt.figure(figsize=(16, 10))
-lsoa_burglary = burglary_df['LSOA name'].value_counts().head(15)
+lsoa_burglary = burglary_df['LSOA_name'].value_counts().head(15)
 sns.barplot(x=lsoa_burglary.values, y=lsoa_burglary.index, palette='Reds_r')
 plt.title('Burglary-prone areas (top 15 LSOAs)', fontsize=18)
 plt.xlabel('burglary amount', fontsize=14)
@@ -311,7 +311,7 @@ plt.show()
 # 13. Percentage of burglary
 plt.figure(figsize=(12, 8))
 
-df_crimes['Crime Category'] = df_crimes['Crime type'].apply(
+df_crimes['Crime Category'] = df_crimes['Crime_type'].apply(
     lambda x: 'Burglary' if x == 'Burglary' else 'Other Crimes')
 category_counts = df_crimes['Crime Category'].value_counts()
 
@@ -326,7 +326,7 @@ plt.show()
 # 14. Classification of burglary outcome
 plt.figure(figsize=(14, 8))
 if 'Last outcome category' in burglary_df.columns:
-    outcome_burglary = burglary_df['Last outcome category'].value_counts()
+    outcome_burglary = burglary_df['Last_outcome_category'].value_counts()
     if len(outcome_burglary) > 10:
         outcome_burglary = outcome_burglary.head(10)
     sns.barplot(x=outcome_burglary.values, y=outcome_burglary.index, palette='YlOrBr')
