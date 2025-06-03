@@ -2,7 +2,7 @@ from pathlib import Path
 import csv
 import pandas as pd
 import pymysql
-
+from tqdm import tqdm
 
 
 def path_finder(path):
@@ -16,7 +16,7 @@ def path_finder(path):
     folder_path = Path(path)
     for folder in folder_path.iterdir():
         for file_path in folder.iterdir():
-            if file_path.is_file():
+            if 'metropolitan' in str(file_path) and file_path.is_file():
                 temp_location = file_opener(file_path)
                 df_location = pd.concat([df_location, temp_location], axis=0)
                 
@@ -25,8 +25,15 @@ def path_finder(path):
 
     # Filters out all unwanted LSOA's.
     LSOA_codes_df = pd.read_csv('data/All_LSOA_codes_london.csv')
-    LSOA_codes = LSOA_codes_df['LSOA code'].tolist()
+    LSOA_codes = LSOA_codes_df['LSOA_code'].tolist()
     df_location = df_location[df_location['LSOA code'].isin(LSOA_codes)]
+
+    expected_columns = [
+        'Crime ID', 'Month', 'Reported by', 'Falls within', 'Longitude', 'Latitude',
+        'Location', 'LSOA code', 'LSOA name', 'Crime type', 'Last outcome category', 'Context'
+    ]
+    df_location = df_location[expected_columns]
+
 
     # Puts the data in the database.
     database_maker(df_location)
@@ -61,7 +68,7 @@ def database_maker(df_location):
     mycursor = mydb.cursor()
     # Define query to insert.
     insert_query = '''
-        INSERT INTO crimes 
+        INSERT INTO crimes_complete
         (`Crime_ID`, `Month`, `Reported_by`, `Falls_within`, `Longitude`, `Latitude`,
          `Location`, `LSOA_code`, `LSOA_name`, `Crime_type`, `Last_outcome_category`, `Context`)
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
@@ -127,8 +134,8 @@ def deprivation(path):
     mydb.close()
 
 # Run the function and some leftover testing code.
-path_finder(r"data/london_crime_database_incomplete")
-deprivation(r'data/imd2019lsoa.csv')
+path_finder(r"data/london_crime_data_complete")
+# deprivation(r'data/imd2019lsoa.csv')
 
 # print(f'len df location: {len(df_location)}')
 # print(f'location columns: {df_location.columns}')

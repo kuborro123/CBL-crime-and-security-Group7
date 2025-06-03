@@ -1,4 +1,4 @@
-from Dataset_maker import burglaries_month_LSOA, get_deprivation_score
+from Dataset_maker import burglaries_month_LSOA_complete
 from datetime import datetime
 from statsmodels.tsa.seasonal import seasonal_decompose
 import pandas as pd
@@ -13,7 +13,7 @@ def prediction_network_test():
     Tests the model and gives a dataframe with 7 columns of different outputs.
     '''
     # Get the data.
-    df_crime_month = burglaries_month_LSOA()
+    df_crime_month = burglaries_month_LSOA_complete()
 
     df_crime_month['month'] = pd.to_datetime(df_crime_month['month'], infer_datetime_format=True)
     df_crime_month = df_crime_month.set_index(['month'])
