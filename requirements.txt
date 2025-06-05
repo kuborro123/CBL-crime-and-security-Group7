@@ -3,3 +3,9 @@ pandas
 seaborn
 matplotlib
 plotly
+tqdm
+joblib
+pmdarima
+statsmodels
+datetime
+pymysql

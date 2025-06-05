@@ -30,7 +30,7 @@ def get_deprivation_score():
 
 def burglaries_LSOA():
     """"
-    selects the amount of burglaries that happend that month in every LSOA
+    selects the amount of burglaries that happend in every LSOA
     """
     # Define the query.
     query = '''SELECT LSOA_code, count(Crime_type) as crime_count
@@ -47,7 +47,7 @@ def get_all_burglary_data():
     selects all burglary data with LSOA code
     """
     # Define the query.
-    query = '''SELECT*
+    query = '''SELECT *
     FROM crimes
     where (Crime_type = 'burglary')
     '''
@@ -64,5 +64,17 @@ def burglaries_month_LSOA_complete():
     FROM crimes_complete
     where (Crime_type = 'burglary')
     group by LSOA_code, month
+    '''
+    return data_loader(query)
+
+def total_burglaries_month():
+    '''
+    returns the total amount of burglaries per month
+    '''
+    query = '''
+    SELECT month, count(Crime_type) as crime_count
+    FROM crimes
+    where (Crime_type = 'burglary')
+    group by month
     '''
     return data_loader(query)

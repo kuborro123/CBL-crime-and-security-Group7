@@ -1,4 +1,4 @@
-from Dataset_maker import burglaries_month_LSOA_complete
+from Dataset_maker import burglaries_month_LSOA_complete, get_deprivation_score, burglaries_month_LSOA
 from datetime import datetime
 from statsmodels.tsa.seasonal import seasonal_decompose
 import pandas as pd
@@ -13,14 +13,16 @@ def prediction_network_test():
     Tests the model and gives a dataframe with 7 columns of different outputs.
     '''
     # Get the data.
-    df_crime_month = burglaries_month_LSOA_complete()
+    df_deprivation = get_deprivation_score()
+    df_crimes_month = burglaries_month_LSOA_complete()
+    df_crimes_deprivation = pd.merge(df_crimes_month, df_deprivation, on='LSOA_code', how='inner')
 
-    df_crime_month['month'] = pd.to_datetime(df_crime_month['month'], infer_datetime_format=True)
-    df_crime_month = df_crime_month.set_index(['month'])
-    df_crime_month = fill_missing_months_test(df_crime_month)
+    df_crimes_deprivation['month'] = pd.to_datetime(df_crimes_deprivation['month'], infer_datetime_format=True)
+    df_crimes_deprivation = df_crimes_deprivation.set_index(['month'])
+    df_crimes_deprivation = fill_missing_months_test(df_crimes_deprivation)
 
     # Group the data by LSOA.
-    grouped = df_crime_month.groupby('LSOA_code')
+    grouped = df_crimes_deprivation.groupby('LSOA_code')
 
     # Run all groups in parallel how many at a time depends on your pc. Change n_jobs to a number if you do not want to
     # use all your logical processors. n_jobs=-1 for full use.
@@ -52,15 +54,22 @@ def process_group_test(LSOA_code, group):
     group_train = group[group.index != datetime(2025, 2, 1)]
     group_test = group[group.index == datetime(2025, 2, 1)]
 
+    exog_features = group[['month_index']].copy()
+    exog_train = exog_features.loc[group_train.index]
+
+
     try:
         # Define the model.
-        SARIMAX_model = pm.auto_arima(group_train[['crime_count']], exogenous=group_train[['month_index']],
+        SARIMAX_model = pm.auto_arima(group_train[['crime_count']], exogenous=exog_train,
                                       start_p=1, start_q=1,
-                                      max_p=1, max_q=1, m=12,
+                                      test='adf',
+                                      max_p=3, max_q=3, m=12,
                                       start_P=0, seasonal=True,
                                       d=None, D=1,
-                                      trace=False, error_action='ignore',
-                                      suppress_warnings=True, stepwise=True)
+                                      trace=False,
+                                      error_action='ignore',
+                                      suppress_warnings=True,
+                                      stepwise=True)
 
         # Predict.
         fitted, lower, high = sarimax_forecast_test(SARIMAX_model, group_train, periods=1)
@@ -109,8 +118,11 @@ def sarimax_forecast_test(SARIMAX_model, prediction_df, periods):
     n_periods = periods
 
     forecast_df = pd.DataFrame(
-        {'month_index': pd.date_range(prediction_df.index[-1], periods=n_periods, freq='MS').month},
-        index=pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=n_periods, freq='MS')
+        {
+            'month_index': pd.date_range(prediction_df.index[-1], periods=periods, freq='MS').month
+            # ,'deprivation': [prediction_df['deprivation'].iloc[-1]] * periods
+        },
+        index=pd.date_range(prediction_df.index[-1] + pd.DateOffset(months=1), periods=periods, freq='MS')
     )
 
     fitted, confint = SARIMAX_model.predict(n_periods=n_periods,
