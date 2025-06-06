@@ -129,7 +129,7 @@ lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
 ward_to_lsoas = lsoas_with_wards.groupby(ward_col)[lsoa_col].apply(list).to_dict()
 
 allocation_df = allocate_resources(lsoas, ward_to_lsoas, lsoa_col, ward_col)
-print(allocation_df.head())
+print(allocation_df.to_string())
 
 # Merge officers_allocated from allocation_df into lsoas
 allocation_df = allocation_df.rename(columns={"lsoa": lsoa_col})
