@@ -114,3 +114,5 @@ def fill_missing_months(df_crimes_month):
 
 if __name__ == '__main__':
     print(prediction_network())
+    prediction_results = prediction_network()
+    prediction_results.to_csv('prediction_results.csv', index=False)
