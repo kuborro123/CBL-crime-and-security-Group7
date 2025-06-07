@@ -1,4 +1,5 @@
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from pulp import *
 from pulp import LpProblem, LpVariable, LpInteger, lpSum, LpMaximize, PULP_CBC_CMD
@@ -12,9 +13,9 @@ LSOA_SHAPE_PATH = 'data/LB_LSOA2021_shp'
 MAX_OFFICERS_PER_WARD = 100
 MAX_PATROL_HOURS_PER_OFFICER = 2
 TOTAL_PATROL_HOURS_PER_WARD = MAX_OFFICERS_PER_WARD * MAX_PATROL_HOURS_PER_OFFICER  # 200
-NEIGHBOR_WEIGHT_ALPHA = 0.05
+NEIGHBOR_WEIGHT_ALPHA = 0.45
 mu = NEIGHBOR_WEIGHT_ALPHA
-
+FORCED_OFFICERS = 8  # Number of officers allocated to extreme-risk LSOAs
 
 def find_london_wards(wards_path):
     shp_path = None
@@ -51,6 +52,47 @@ def load_lsoa_data(lsoa_shape_path):
     return lsoas, lsoa_col
 
 
+def plot_allocation_map(lsoas, allocation_df, wards, ward_col, lsoa_col):
+    allocation_df = allocation_df.rename(columns={"lsoa": lsoa_col})
+    map_df = lsoas.merge(
+        allocation_df[[lsoa_col, "officers_allocated"]],
+        on=lsoa_col,
+        how="left"
+    )
+    map_df["officers_allocated"] = map_df["officers_allocated"].fillna(0).astype(int)
+
+    # Use lsoas_with_wards to build ward boundaries by dissolving LSOAs per ward
+    lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
+    ward_boundaries = lsoas_with_wards.dissolve(by=ward_col).reset_index()[[ward_col, "geometry"]]
+
+    fig, ax = plt.subplots(1, 1, figsize=(12, 12))
+    # Plot LSOAs shaded by officers_allocated
+    map_df.plot(
+        column="officers_allocated",
+        cmap="OrRd",
+        linewidth=0.1,
+        edgecolor="grey",
+        legend=True,
+        legend_kwds={
+            "label": "Number of Officers Allocated",
+            "orientation": "horizontal",
+            "shrink": 0.6
+        },
+        ax=ax
+    )
+    # Overlay ward boundaries derived from LSOAs
+    ward_boundaries.plot(
+        ax=ax,
+        facecolor="none",
+        edgecolor="black",
+        linewidth=1
+    )
+    ax.set_title("London LSOA Officers Allocated (Darker = More Officers) with Ward Boundaries", fontsize=16)
+    ax.axis("off")
+    plt.tight_layout()
+    plt.show()
+
+
 def compute_neighbor_pairs_with_weights(lsoas, lsoa_col, all_scores):
     """
     Compute adjacent LSOA pairs and assign risk-based weights.
@@ -80,71 +122,106 @@ def compute_neighbor_pairs_with_weights(lsoas, lsoa_col, all_scores):
 
 def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: str, ward_name_col: str) -> pd.DataFrame:
     records = []
-    neighbor_pairs = compute_neighbor_pairs_with_weights(lsoas, lsoa_col,
-                                                         lsoas.set_index(lsoa_col)["risk_score"].to_dict())[0]
+    # Precompute neighbor pairs (weights not used in smoothing penalty here)
+    neighbor_pairs, _ = compute_neighbor_pairs_with_weights(
+        lsoas, lsoa_col,
+        lsoas.set_index(lsoa_col)["risk_score"].to_dict()
+    )
 
     for ward, lsoa_list in ward_to_lsoas.items():
         subset = lsoas[lsoas[lsoa_col].isin(lsoa_list)]
         scores = dict(zip(subset[lsoa_col], subset["risk_score"]))
 
-        N = len(lsoa_list)
-        total_officers = MAX_OFFICERS_PER_WARD
+        # 1) Compute mean and std over positive risk scores
+        positive_scores = [s for s in scores.values() if s > 0]
+        if positive_scores:
+            mean = np.mean(positive_scores)
+            std = np.std(positive_scores, ddof=0)
+        else:
+            mean = std = 0
 
-        # even share and cap
-        even_share = total_officers / N
-        max_off = int(math.ceil(even_share * NEIGHBOR_WEIGHT_ALPHA))  # or any cap you prefer
+        # Prepare list of remaining LSOAs
+        remaining_ls = list(lsoa_list)
 
-        # 1. officer variables, forced ≥0 and ≤max_off
-        officers = {
-            l: LpVariable(f"off_{l}", lowBound=0, upBound=max_off, cat="Integer")
-            for l in lsoa_list
-        }
+        # 2) Assign 0 officers to non-positive risk LSOAs
+        for lsoa in list(remaining_ls):
+            if scores[lsoa] <= 0:
+                records.append({
+                    "ward": ward,
+                    "lsoa": lsoa,
+                    "risk_score": scores[lsoa],
+                    "officers_allocated": 0,
+                    "patrol_hours": 0
+                })
+                remaining_ls.remove(lsoa)
 
-        # 2. pick only the neighbor‐pairs inside this ward
-        edges = [(i, j) for i, j in neighbor_pairs if i in lsoa_list and j in lsoa_list]
-
-        # 3. one slack var per edge
-        slack = {
-            (i, j): LpVariable(f"s_{i}_{j}", lowBound=0)
-            for i, j in edges
-        }
-
-        # 4. build the problem
-        prob = LpProblem(f"ward_{ward}", LpMaximize)
-
-        # 4a. base risk objective (hours = officers * 2)
-        base_obj = lpSum(
-            scores[l] * officers[l] * MAX_PATROL_HOURS_PER_OFFICER
-            for l in lsoa_list
-        )
-        # 4b. smoothing penalty
-        smooth_penalty = lpSum(slack[(i, j)] for i, j in edges)
-
-        prob += base_obj - mu * smooth_penalty
-
-        # 5. total‐officer constraint
-        prob += lpSum(officers.values()) == total_officers, "Total_Officers"
-
-        # 6. absolute‐difference constraints
-        for i, j in edges:
-            prob += officers[i] - officers[j] <= slack[(i, j)]
-            prob += officers[j] - officers[i] <= slack[(i, j)]
-
-        # 7. solve
-        prob.solve(PULP_CBC_CMD(msg=0))
-
-        # 8. collect results
-        for l in lsoa_list:
-            num_off = int(officers[l].value() or 0)
+        # 3) Assign forced officers to extreme-risk LSOAs (> mean + 3σ)
+        extreme_ls = [l for l in remaining_ls if scores[l] > mean + 3 * std]
+        for lsoa in extreme_ls:
             records.append({
                 "ward": ward,
-                "lsoa": l,
-                "risk_score": scores[l],
-                "officers_allocated": num_off,
-                "patrol_hours": num_off * MAX_PATROL_HOURS_PER_OFFICER
+                "lsoa": lsoa,
+                "risk_score": scores[lsoa],
+                "officers_allocated": FORCED_OFFICERS,
+                "patrol_hours": FORCED_OFFICERS * MAX_PATROL_HOURS_PER_OFFICER
             })
+            remaining_ls.remove(lsoa)
+
+        # 4) Compute how many officers remain
+        used = len(extreme_ls) * FORCED_OFFICERS
+        to_allocate = MAX_OFFICERS_PER_WARD - used
+        print(f"Ward={ward!r}: μ={mean:.2f}, σ={std:.2f}, extremes={len(extreme_ls)}, leftover_officers={to_allocate}")
+
+        # 5) LP allocation on remaining LSOAs
+        if to_allocate > 0 and remaining_ls:
+            # Officer decision variables
+            officers = {
+                l: LpVariable(f"off_{l}", lowBound=0, cat=LpInteger)
+                for l in remaining_ls
+            }
+
+            # Select neighbor edges within remaining set
+            edges = [(i, j) for i, j in neighbor_pairs if i in remaining_ls and j in remaining_ls]
+            # Slack variables for smoothing
+            slack = {
+                (i, j): LpVariable(f"s_{i}_{j}", lowBound=0)
+                for i, j in edges
+            }
+
+            # Build LP problem
+            prob = LpProblem(f"ward_{ward}", LpMaximize)
+            # Objective: maximize risk coverage minus smoothing penalty
+            base_obj = lpSum(
+                scores[l] * officers[l] * MAX_PATROL_HOURS_PER_OFFICER
+                for l in remaining_ls
+            )
+            smooth_penalty = lpSum(slack[(i, j)] for i, j in edges)
+            prob += base_obj - mu * smooth_penalty
+
+            # Total officers constraint
+            prob += lpSum(officers.values()) == to_allocate, "Total_Officers"
+
+            # Absolute-difference constraints for smoothing
+            for i, j in edges:
+                prob += officers[i] - officers[j] <= slack[(i, j)]
+                prob += officers[j] - officers[i] <= slack[(i, j)]
+
+            # Solve
+            prob.solve(PULP_CBC_CMD(msg=0))
+
+            # Collect LP results
+            for l in remaining_ls:
+                alloc = int(officers[l].value() or 0)
+                records.append({
+                    "ward": ward,
+                    "lsoa": l,
+                    "risk_score": scores[l],
+                    "officers_allocated": alloc,
+                    "patrol_hours": alloc * MAX_PATROL_HOURS_PER_OFFICER
+                })
 
     return pd.DataFrame(records)
+
 
 
 # Define column names for LSOA and ward
@@ -170,6 +247,21 @@ lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
 ward_to_lsoas = lsoas_with_wards.groupby(ward_col)[lsoa_col].apply(list).to_dict()
 
 allocation_df = allocate_resources(lsoas, ward_to_lsoas, lsoa_col, ward_col)
+
+ward_risk_stats = lsoas_with_wards.groupby(ward_col)["risk_score"].agg(
+        avg_risk_score="mean",
+        median_risk_score="median",
+        highest_risk_score="max",
+        lowest_risk_score="min",
+        q1_risk_score=lambda x: x.quantile(0.25),
+        q3_risk_score=lambda x: x.quantile(0.75),
+        expected_value="mean",
+        std_dev="std"
+    ).reset_index()
+
+# Print the results
+print(ward_risk_stats.to_string(index=False))
+
 # Calculate total officers and patrol hours per ward
 ward_summary = allocation_df.groupby("ward").agg(
     total_officers_allocated=("officers_allocated", "sum"),
@@ -180,41 +272,6 @@ print(ward_summary.to_string())
 print(allocation_df.to_string())
 
 # Merge officers_allocated from allocation_df into lsoas
-allocation_df = allocation_df.rename(columns={"lsoa": lsoa_col})
-map_df = lsoas.merge(
-    allocation_df[[lsoa_col, "officers_allocated"]],
-    on=lsoa_col,
-    how="left"
-)
-map_df["officers_allocated"] = map_df["officers_allocated"].fillna(0).astype(int)
 
-# Use lsoas_with_wards to build ward boundaries by dissolving LSOAs per ward
-lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
-ward_boundaries = lsoas_with_wards.dissolve(by=ward_col).reset_index()[[ward_col, "geometry"]]
 
-fig, ax = plt.subplots(1, 1, figsize=(12, 12))
-# Plot LSOAs shaded by officers_allocated
-map_df.plot(
-    column="officers_allocated",
-    cmap="OrRd",
-    linewidth=0.1,
-    edgecolor="grey",
-    legend=True,
-    legend_kwds={
-        "label": "Number of Officers Allocated",
-        "orientation": "horizontal",
-        "shrink": 0.6
-    },
-    ax=ax
-)
-# Overlay ward boundaries derived from LSOAs
-ward_boundaries.plot(
-    ax=ax,
-    facecolor="none",
-    edgecolor="black",
-    linewidth=1
-)
-ax.set_title("London LSOA Officers Allocated (Darker = More Officers) with Ward Boundaries", fontsize=16)
-ax.axis("off")
-plt.tight_layout()
-plt.show()
+plot_allocation_map(lsoas, allocation_df, wards, ward_col, lsoa_col)
