@@ -143,3 +143,14 @@ for lsoa in lsoa_list:
 
 # Plot burglary data on a map with LSOA boundaries
 plot_burglary_data(lsoas, gdf)
+
+"""
+np.random.seed(42)  # For reproducibility
+mock_risk_scores = pd.DataFrame({
+    "lsoa21cd": lsoas["lsoa21cd"],
+    "risk_score": np.random.uniform(0.1, 1.0, size=len(lsoas))  # Random scores between 0.1 and 1.0
+})
+
+mock_risk_scores = mock_risk_scores.set_index("lsoa21cd")["risk_score"]
+
+"""
