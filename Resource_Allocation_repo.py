@@ -5,6 +5,7 @@ from pulp import LpProblem, LpVariable, LpInteger, lpSum, LpMaximize, PULP_CBC_C
 from time_series_prediction import prediction_network
 import matplotlib.pyplot as plt
 
+
 # Constants
 WARDS_PATH = 'data/London-wards-2018'
 LSOA_SHAPE_PATH = 'data/LB_LSOA2021_shp'
@@ -50,17 +51,23 @@ def load_lsoa_data(lsoa_shape_path):
 
 
 def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: str, ward_name_col: str) -> pd.DataFrame:
+
+
     allocation_results = []
 
     for ward, lsoas_in_ward in ward_to_lsoas.items():
-        # Subset to just these LSOAs
+        # 1) Subset to just these LSOAs
         ward_lsoas = lsoas[lsoas[lsoa_col].isin(lsoas_in_ward)].copy()
-        raw_risk = {row[lsoa_col]: max(float(row["risk_score"]), 0.0)
-                    for _, row in ward_lsoas.iterrows()}
+
+        # 2) Build a dict {lcode: risk_score}, forcing nonnegative
+        raw_risk = {
+            row[lsoa_col]: max(float(row["risk_score"]), 0.0)
+            for _, row in ward_lsoas.iterrows()
+        }
 
         total_risk = sum(raw_risk.values())
         if total_risk <= 0:
-            # If risk is zero or negative everywhere, allocate zero
+            # If risk is zero everywhere, allocate zero officers
             for lcode in lsoas_in_ward:
                 allocation_results.append({
                     "ward": ward,
@@ -71,30 +78,28 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
                 })
             continue
 
-        # 1) Compute “ideal” float number of officers for each LSOA
-        ideal_officers = {
-            lcode: (raw_risk[lcode] / total_risk) * MAX_OFFICERS_PER_WARD
+        # 3) Set up PuLP ILP: one integer var per LSOA in this ward
+        prob = LpProblem(f"Allocate_{ward}", LpMaximize)
+        y = {
+            lcode: LpVariable(f"y_{ward}_{lcode}", lowBound=0, cat=LpInteger)
             for lcode in lsoas_in_ward
         }
 
-        # 2) Floor to integer and track remainders
-        floor_off = {lcode: int(ideal_officers[lcode]) for lcode in lsoas_in_ward}
-        remainders = {lcode: ideal_officers[lcode] - floor_off[lcode] for lcode in lsoas_in_ward}
+        # 4) Constraint: total officers = MAX_OFFICERS_PER_WARD
+        prob += lpSum(y[lcode] for lcode in lsoas_in_ward) == MAX_OFFICERS_PER_WARD
 
-        allocated_so_far = sum(floor_off.values())
-        deficit = MAX_OFFICERS_PER_WARD - allocated_so_far
+        # 5) Objective: maximize sum_{lcode}(risk_score[lcode] * y[lcode])
+        prob += lpSum(raw_risk[lcode] * y[lcode] for lcode in lsoas_in_ward)
 
-        # 3) Sort by largest fractional remainder and give one more officer until we reach 100
-        sorted_lsoas = sorted(remainders.items(), key=lambda x: x[1], reverse=True)
-        for i in range(deficit):
-            lsoa_to_boost = sorted_lsoas[i][0]
-            floor_off[lsoa_to_boost] += 1
+        # 6) Solve (CBC, silent)
+        prob.solve(PULP_CBC_CMD(msg=False))
 
-        # 4) Now floor_off[lcode] is the final integer count of officers for each LSOA.
-        #    Patrol hours = officers * 2
+        # 7) Extract solution: if any varValue is None, treat as zero
         for lcode in lsoas_in_ward:
-            officers_count = floor_off[lcode]
+            val = y[lcode].varValue
+            officers_count = int(val) if val is not None else 0
             hours = officers_count * MAX_PATROL_HOURS_PER_OFFICER
+
             allocation_results.append({
                 "ward": ward,
                 "lsoa": lcode,
@@ -104,7 +109,6 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
             })
 
     return pd.DataFrame(allocation_results)
-
 
 # Define column names for LSOA and ward
 lsoa_col = "lsoa21cd"
