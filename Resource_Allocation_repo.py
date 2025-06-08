@@ -12,7 +12,7 @@ LSOA_SHAPE_PATH = 'data/LB_LSOA2021_shp'
 MAX_OFFICERS_PER_WARD = 100
 MAX_PATROL_HOURS_PER_OFFICER = 2
 TOTAL_PATROL_HOURS_PER_WARD = MAX_OFFICERS_PER_WARD * MAX_PATROL_HOURS_PER_OFFICER  # 200
-NEIGHBOR_WEIGHT_ALPHA = 0.45
+NEIGHBOR_WEIGHT_ALPHA = 0.50
 mu = NEIGHBOR_WEIGHT_ALPHA
 
 
@@ -121,66 +121,93 @@ def compute_neighbor_pairs_with_weights(lsoas, lsoa_col, all_scores):
 
 def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: str, ward_name_col: str) -> pd.DataFrame:
     records = []
-    neighbor_pairs = compute_neighbor_pairs_with_weights(lsoas, lsoa_col,
-                                                         lsoas.set_index(lsoa_col)["risk_score"].to_dict())[0]
+    neighbor_pairs, _ = compute_neighbor_pairs_with_weights(
+        lsoas, lsoa_col, lsoas.set_index(lsoa_col)["risk_score"].to_dict()
+    )
 
     for ward, lsoa_list in ward_to_lsoas.items():
-        subset = lsoas[lsoas[lsoa_col].isin(lsoa_list)]
-        scores = dict(zip(subset[lsoa_col], subset["risk_score"]))
+        ward_lsoas = lsoas[lsoas[lsoa_col].isin(lsoa_list)].copy()
+        scores = dict(zip(ward_lsoas[lsoa_col], ward_lsoas["risk_score"]))
 
-        N = len(lsoa_list)
-        total_officers = MAX_OFFICERS_PER_WARD
+        # --- START: NEW LOGIC FOR OUTLIER DETECTION ---
+        # 1. Calculate risk score average and standard deviation for the ward
+        risk_scores = ward_lsoas["risk_score"]
+        ward_avg = risk_scores.mean()
+        ward_std = risk_scores.std()
 
-        # even share and cap
-        even_share = total_officers / N
-        max_off = int(math.ceil(even_share * NEIGHBOR_WEIGHT_ALPHA))  # or any cap you prefer
+        # Handle cases where std is 0 to avoid division by zero or pointless checks
+        if pd.isna(ward_std) or ward_std == 0:
+            threshold = ward_avg
+        else:
+            threshold = ward_avg + (2.5 * ward_std)
 
-        # 1. officer variables, forced ≥0 and ≤max_off
+        # 2. Identify outlier LSOAs (score > avg + 3*std)
+        outlier_lsoas = ward_lsoas[ward_lsoas["risk_score"] > threshold]
+
+        lsoas_for_optimization = lsoa_list.copy()
+        remaining_officers = MAX_OFFICERS_PER_WARD
+
+        # 3. Pre-allocate 8 officers to each outlier and remove them from the pool
+        # We sort outliers by risk to prioritize the highest-risk ones if officer budget is tight
+        for lsoa_code in outlier_lsoas.sort_values("risk_score", ascending=False)[lsoa_col]:
+            if remaining_officers >= 8:
+                num_off = 8
+                records.append({
+                    "ward": ward,
+                    "lsoa": lsoa_code,
+                    "risk_score": scores[lsoa_code],
+                    "officers_allocated": num_off,
+                    "patrol_hours": num_off * MAX_PATROL_HOURS_PER_OFFICER
+                })
+                remaining_officers -= num_off
+                lsoas_for_optimization.remove(lsoa_code)
+        # --- END: NEW LOGIC FOR OUTLIER DETECTION ---
+
+        # 4. Run optimization only if there are remaining officers and LSOAs
+        if not lsoas_for_optimization or remaining_officers <= 0:
+            # If all LSOAs were outliers or no officers are left, skip optimization for this ward
+            continue
+
+        subset_scores = {l: scores[l] for l in lsoas_for_optimization}
+        N = len(lsoas_for_optimization)
+        total_officers = remaining_officers  # Use remaining officers
+
+        even_share = total_officers / N if N > 0 else 0
+        # Cap allocation to avoid one LSOA taking all resources
+        max_off = int(math.ceil(even_share * NEIGHBOR_WEIGHT_ALPHA * 2)) if even_share > 0 else total_officers
+
         officers = {
             l: LpVariable(f"off_{l}", lowBound=0, upBound=max_off, cat="Integer")
-            for l in lsoa_list
+            for l in lsoas_for_optimization
         }
 
-        # 2. pick only the neighbor‐pairs inside this ward
-        edges = [(i, j) for i, j in neighbor_pairs if i in lsoa_list and j in lsoa_list]
-
-        # 3. one slack var per edge
+        edges = [(i, j) for i, j in neighbor_pairs if i in lsoas_for_optimization and j in lsoas_for_optimization]
         slack = {
             (i, j): LpVariable(f"s_{i}_{j}", lowBound=0)
             for i, j in edges
         }
 
-        # 4. build the problem
-        prob = LpProblem(f"ward_{ward}", LpMaximize)
-
-        # 4a. base risk objective (hours = officers * 2)
+        prob = LpProblem(f"ward_{ward}_opt", LpMaximize)
         base_obj = lpSum(
-            scores[l] * officers[l] * MAX_PATROL_HOURS_PER_OFFICER
-            for l in lsoa_list
+            subset_scores[l] * officers[l] * MAX_PATROL_HOURS_PER_OFFICER
+            for l in lsoas_for_optimization
         )
-        # 4b. smoothing penalty
         smooth_penalty = lpSum(slack[(i, j)] for i, j in edges)
-
         prob += base_obj - mu * smooth_penalty
-
-        # 5. total‐officer constraint
         prob += lpSum(officers.values()) == total_officers, "Total_Officers"
 
-        # 6. absolute‐difference constraints
         for i, j in edges:
             prob += officers[i] - officers[j] <= slack[(i, j)]
             prob += officers[j] - officers[i] <= slack[(i, j)]
 
-        # 7. solve
         prob.solve(PULP_CBC_CMD(msg=0))
 
-        # 8. collect results
-        for l in lsoa_list:
+        for l in lsoas_for_optimization:
             num_off = int(officers[l].value() or 0)
             records.append({
                 "ward": ward,
                 "lsoa": l,
-                "risk_score": scores[l],
+                "risk_score": subset_scores[l],
                 "officers_allocated": num_off,
                 "patrol_hours": num_off * MAX_PATROL_HOURS_PER_OFFICER
             })
