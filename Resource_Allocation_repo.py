@@ -1,4 +1,5 @@
 import geopandas as gpd
+import numpy as np
 import pandas as pd
 from pulp import *
 from pulp import LpProblem, LpVariable, LpInteger, lpSum, LpMaximize, PULP_CBC_CMD
@@ -127,9 +128,14 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
 
     for ward, lsoa_list in ward_to_lsoas.items():
         ward_lsoas = lsoas[lsoas[lsoa_col].isin(lsoa_list)].copy()
-        scores = dict(zip(ward_lsoas[lsoa_col], ward_lsoas["risk_score"]))
+        ward_lsoas["log_risk"] = ward_lsoas["risk_score"].apply(np.log1p)
+        scores = dict(zip(ward_lsoas[lsoa_col], ward_lsoas["log_risk"]))
+        ward_lsoas["risk_score"] = ward_lsoas["risk_score"].clip(lower=0)
 
-        # --- START: NEW LOGIC FOR OUTLIER DETECTION ---
+        # 2. Apply the logarithmic transformation on the cleaned scores
+        ward_lsoas["log_risk"] = ward_lsoas["risk_score"].apply(np.log1p)
+        scores = dict(zip(ward_lsoas[lsoa_col], ward_lsoas["log_risk"]))
+
         # 1. Calculate risk score average and standard deviation for the ward
         risk_scores = ward_lsoas["risk_score"]
         ward_avg = risk_scores.mean()
@@ -161,7 +167,6 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
                 })
                 remaining_officers -= num_off
                 lsoas_for_optimization.remove(lsoa_code)
-        # --- END: NEW LOGIC FOR OUTLIER DETECTION ---
 
         # 4. Run optimization only if there are remaining officers and LSOAs
         if not lsoas_for_optimization or remaining_officers <= 0:
@@ -238,18 +243,6 @@ lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
 ward_to_lsoas = lsoas_with_wards.groupby(ward_col)[lsoa_col].apply(list).to_dict()
 
 allocation_df = allocate_resources(lsoas, ward_to_lsoas, lsoa_col, ward_col)
-
-ward_risk_stats = lsoas_with_wards.groupby(ward_col)["risk_score"].agg(
-    avg_risk_score="mean",
-    median_risk_score="median",
-    highest_risk_score="max",
-    lowest_risk_score="min",
-    q1_risk_score=lambda x: x.quantile(0.25),
-    q3_risk_score=lambda x: x.quantile(0.75)
-).reset_index()
-
-# Print the results
-print(ward_risk_stats.to_string(index=False))
 
 # Calculate total officers and patrol hours per ward
 ward_summary = allocation_df.groupby("ward").agg(
