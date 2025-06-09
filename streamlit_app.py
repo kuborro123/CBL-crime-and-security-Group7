@@ -7,6 +7,9 @@ import json
 st.set_page_config(page_title="Crime Dashboard", layout="wide")
 st.title("London Crime Analysis")
 
+# Mapbox token (your token)
+px.set_mapbox_access_token("pk.eyJ1Ijoia3Vib3JybyIsImEiOiJjbWJwcG93aWMwN2R6MmxxdTNxbGliamdxIn0.2R-jJjLu8pU_dvbr_vylmw")
+
 # File directory for data
 DATA_DIR = "Streamlit_files"
 
@@ -78,17 +81,17 @@ elif page == "LSOA Monthly Crimes":
         geojson=geojson,
         locations="LSOA_code",
         color="crime_count",
-        featureidkey="properties.LSOA11CD",  # Adjust if your GeoJSON uses a different key
-        mapbox_style="carto-positron",
+        featureidkey="properties.LSOA11CD",  # Adjust if needed
+        mapbox_style="light",
         center={"lat": 51.5074, "lon": -0.1278},
         zoom=9,
         opacity=0.6,
         hover_name="LSOA_code"
     )
-    fig.update_layout(margin={"r":0, "t":0, "l":0, "b":0})
+    fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
     st.plotly_chart(fig, use_container_width=True)
 
-    # Time series for selected LSOA
+    # Time series per LSOA
     lsoas = sorted(df["LSOA_code"].unique())
     selected = st.selectbox("Inspect Time Series for LSOA", lsoas)
     df_f = df[df["LSOA_code"] == selected]
