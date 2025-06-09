@@ -1,141 +1,89 @@
 import pandas as pd
 import streamlit as st
-import seaborn as sns
-import matplotlib.pyplot as plt
 import plotly.express as px
 
-# Page config
-st.set_page_config(page_title='Data Explorer', page_icon='📊', layout='wide')
+# Page configuration
+st.set_page_config(page_title="Crime Dashboard", layout="wide")
+st.title("London Crime Analysis")
 
-# Dataset definitions
-DATASETS = {
-    'Daily Sales': {
-        'file': 'data/sales_data_daily.csv',
-        'date_col': 'date'
-    },
-    'Customers': {
-        'file': 'data/customer_data.csv',
-        'date_col': 'signup_date'
-    }
-}
+# File directory for data
+DATA_DIR = "Streamlit_files"
 
-# Sidebar - dataset selector
-st.sidebar.title("Choose Dataset")
-dataset_name = st.sidebar.selectbox("Dataset", list(DATASETS.keys()))
-spec = DATASETS[dataset_name]
+# ---------- Data Loaders ----------
 
-# Cached loader
-@st.cache_data(show_spinner='Loading data …')
-def load_data(path, date_col):
-    df = pd.read_csv(path, parse_dates=[date_col])
+@st.cache_data(show_spinner="Loading data...")
+def load_csv(filename, **kwargs):
+    path = f"{DATA_DIR}/{filename}"
+    return pd.read_csv(path, **kwargs)
+
+def load_total_burglaries():
+    df = load_csv("total_burglaries_per_month.csv", index_col=0)
+    df["month"] = pd.to_datetime(df["month"], format="%Y-%m")
+    return df.sort_values("month")
+
+def load_lsoa_monthly():
+    df = load_csv("crimes_per_month_per_LSOA.csv", index_col=0, parse_dates=True)
+    df.index.name = "month"
+    df.reset_index(inplace=True)
+    df["month"] = pd.to_datetime(df["month"])
     return df
 
-df = load_data(spec['file'], spec['date_col'])
-st.title(f"{dataset_name} Dashboard")
+def load_burglaries_lsoa():
+    return load_csv("burglaries_per_LSOA.csv", index_col=0)
 
-# ---------------------------------------------------------------------------
-# DAILY SALES DASHBOARD
-# ---------------------------------------------------------------------------
-if dataset_name == 'Daily Sales':
-    # Filters
-    regions = st.sidebar.multiselect('Region', sorted(df['region'].unique()), default=sorted(df['region'].unique()))
-    df_f = df[df['region'].isin(regions)]
+def load_deprivation():
+    return load_csv("deprivation_LSOA.csv", index_col=0)
 
-    start_date = df_f['date'].min().to_pydatetime()
-    end_date = df_f['date'].max().to_pydatetime()
-    date_range = st.sidebar.slider('Date range', min_value=start_date, max_value=end_date, value=(start_date, end_date))
-    df_f = df_f[(df_f['date'] >= date_range[0]) & (df_f['date'] <= date_range[1])]
+def load_schedule():
+    return load_csv("schedule_output.csv")
 
-    # Trend line
-    st.subheader('📈 Daily Sales Trend')
-    pivot = df_f.pivot_table(index='date', columns='region', values='sales', aggfunc='sum')
-    st.line_chart(pivot)
+# ---------- Sidebar Navigation ----------
 
-    # Bar chart
-    st.subheader('📊 Total Sales by Region')
-    totals = df_f.groupby('region')['sales'].sum()
-    st.bar_chart(totals)
+PAGES = [
+    "Total Burglaries", 
+    "LSOA Monthly Crimes", 
+    "Deprivation vs Burglaries", 
+    "Resource Allocation"
+]
 
-    # Heatmap by region/month
-    st.subheader("🔥 Average Sales Heatmap")
-    df_f['month'] = df_f['date'].dt.strftime('%b')
-    df_f['year'] = df_f['date'].dt.year
-    pivot_heat = df_f.pivot_table(index='region', columns='month', values='sales', aggfunc='mean')
-    fig, ax = plt.subplots()
-    sns.heatmap(pivot_heat, annot=True, fmt=".0f", cmap="YlGnBu", ax=ax)
-    st.pyplot(fig)
+page = st.sidebar.selectbox("Select Page", PAGES)
 
-    # Map visualization
-    st.subheader("🗺️ Sales by Region (Map)")
-    region_coords = {
-        'North': {'lat': 52.5, 'lon': 19.5},
-        'South': {'lat': 49.5, 'lon': 19.5},
-        'East':  {'lat': 51.0, 'lon': 23.5},
-        'West':  {'lat': 51.0, 'lon': 15.5},
-    }
-    map_df = df_f.groupby("region")["sales"].sum().reset_index()
-    map_df["lat"] = map_df["region"].map(lambda x: region_coords[x]["lat"])
-    map_df["lon"] = map_df["region"].map(lambda x: region_coords[x]["lon"])
+# ---------- Page Logic ----------
 
-    fig = px.scatter_mapbox(
-        map_df,
-        lat="lat",
-        lon="lon",
-        size="sales",
-        hover_name="region",
-        size_max=50,
-        color="sales",
-        zoom=4,
-        mapbox_style="open-street-map"
-    )
+if page == "Total Burglaries":
+    df = load_total_burglaries()
+    st.subheader("Total Burglaries per Month")
+    fig = px.line(df, x="month", y="crime_count", markers=True)
     st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(df)
 
-    # Raw data
-    st.subheader('🧾 Raw Data')
+elif page == "LSOA Monthly Crimes":
+    df = load_lsoa_monthly()
+    lsoas = sorted(df["LSOA_code"].unique())
+    selected = st.selectbox("LSOA Code", lsoas)
+    df_f = df[df["LSOA_code"] == selected]
+    st.subheader(f"Monthly Burglaries for {selected}")
+    fig = px.line(df_f, x="month", y="crime_count", markers=True)
+    st.plotly_chart(fig, use_container_width=True)
     st.dataframe(df_f)
 
-# ---------------------------------------------------------------------------
-# CUSTOMER DASHBOARD
-# ---------------------------------------------------------------------------
-else:
-    # Filters
-    regions = st.sidebar.multiselect('Region', sorted(df['region'].unique()), default=sorted(df['region'].unique()))
-    genders = st.sidebar.multiselect('Gender', sorted(df['gender'].unique()), default=sorted(df['gender'].unique()))
-    df_f = df[df['region'].isin(regions) & df['gender'].isin(genders)]
+elif page == "Deprivation vs Burglaries":
+    burg = load_burglaries_lsoa()
+    dep = load_deprivation()
+    merged = pd.merge(burg, dep, on="LSOA_code", how="inner")
+    st.subheader("Burglary Count vs Deprivation Score")
+    fig = px.scatter(merged, x="deprivation", y="crime_count", hover_name="LSOA_code")
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(merged)
 
-    # KPIs
-    st.metric('👥 Total Customers', len(df_f))
-    churn_rate = df_f['churned'].mean()
-    st.metric('⚠️ Churn Rate', f'{churn_rate:.1%}')
+elif page == "Resource Allocation":
+    df = load_schedule()
+    wards = sorted(df["ward"].unique())
+    ward = st.selectbox("Ward", ["All"] + wards)
+    if ward != "All":
+        df = df[df["ward"] == ward]
+    st.subheader("Officer Allocation Schedule")
+    st.dataframe(df)
 
-    # Churn heatmap
-    st.subheader("🔥 Churn Rate Heatmap by Gender and Region")
-    churn_pivot = df_f.pivot_table(index='gender', columns='region', values='churned', aggfunc='mean')
-    fig, ax = plt.subplots()
-    sns.heatmap(churn_pivot, annot=True, fmt=".2f", cmap="RdPu", ax=ax)
-    st.pyplot(fig)
-
-    # Bar charts
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("Gender Distribution")
-        st.bar_chart(df_f['gender'].value_counts())
-
-    with col2:
-        st.subheader("Age Distribution")
-        age_counts = df_f['age'].value_counts().sort_index()
-        st.bar_chart(age_counts)
-
-    # Churn by region
-    st.subheader("📉 Churn by Region")
-    churn_by_region = df_f.groupby('region')['churned'].mean()
-    st.bar_chart(churn_by_region)
-
-    # Raw data
-    st.subheader('🧾 Raw Data')
-    st.dataframe(df_f)
-
-# ---------------------------------------------------------------------------
-# Footer
-# ---------------------------------------------------------------------------
-st.markdown('---\nMade with ❤️ using Streamlit')
+# ---------- Footer ----------
+st.markdown("---\nMade with ❤️ using Streamlit")
