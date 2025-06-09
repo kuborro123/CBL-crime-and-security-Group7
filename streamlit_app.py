@@ -40,9 +40,9 @@ def load_schedule():
 # ---------- Sidebar Navigation ----------
 
 PAGES = [
-    "Total Burglaries", 
-    "LSOA Monthly Crimes", 
-    "Deprivation vs Burglaries", 
+    "Total Burglaries",
+    "LSOA Monthly Crimes",
+    "Deprivation vs Burglaries",
     "Resource Allocation"
 ]
 
