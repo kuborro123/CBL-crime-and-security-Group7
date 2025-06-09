@@ -70,23 +70,23 @@ elif page == "LSOA Monthly Crimes":
     df = load_lsoa_monthly()
     geojson = load_lsoa_geojson()
 
-    # Month selection
-    selected_month = st.selectbox("Select Month", sorted(df["month"].dt.strftime("%Y-%m").unique()))
-    df_month = df[df["month"].dt.strftime("%Y-%m") == selected_month]
+    # Aggregate total crimes per LSOA
+    df_total = df.groupby("LSOA_code", as_index=False)["crime_count"].sum()
 
-    st.subheader(f"Burglary Map for {selected_month}")
+    st.subheader("Total Burglary Map (All Months Combined)")
 
     fig = px.choropleth_mapbox(
-        df_month,
+        df_total,
         geojson=geojson,
         locations="LSOA_code",
         color="crime_count",
-        featureidkey="properties.LSOA11CD",  # Adjust if needed
+        featureidkey="properties.LSOA11CD",  # Adjust this if needed
         mapbox_style="light",
         center={"lat": 51.5074, "lon": -0.1278},
         zoom=9,
         opacity=0.6,
-        hover_name="LSOA_code"
+        hover_name="LSOA_code",
+        color_continuous_scale="OrRd"
     )
     fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
     st.plotly_chart(fig, use_container_width=True)
@@ -99,6 +99,7 @@ elif page == "LSOA Monthly Crimes":
     fig = px.line(df_f, x="month", y="crime_count", markers=True)
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(df_f)
+
 
 elif page == "Deprivation vs Burglaries":
     burg = load_burglaries_lsoa()
