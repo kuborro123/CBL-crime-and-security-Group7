@@ -76,18 +76,19 @@ elif page == "LSOA Monthly Crimes":
     st.subheader("Total Burglary Map (All Months Combined)")
 
     fig = px.choropleth_mapbox(
-        df_total,
-        geojson=geojson,
-        locations="LSOA_code",
-        color="crime_count",
-        featureidkey="properties.LSOA11CD",  # Adjust this if needed
-        mapbox_style="light",
-        center={"lat": 51.5074, "lon": -0.1278},
-        zoom=9,
-        opacity=0.6,
-        hover_name="LSOA_code",
-        color_continuous_scale="OrRd"
+    df_total,
+    geojson=geojson,
+    locations="LSOA_code",
+    color="crime_count",
+    featureidkey="properties.LSOA21CD",  # 👈 update this!
+    mapbox_style="light",
+    center={"lat": 51.5074, "lon": -0.1278},
+    zoom=9,
+    opacity=0.6,
+    hover_name="LSOA_code",
+    color_continuous_scale="OrRd"
     )
+
     fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
     st.plotly_chart(fig, use_container_width=True)
 
