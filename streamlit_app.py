@@ -1,6 +1,7 @@
 import pandas as pd
 import streamlit as st
 import plotly.express as px
+import json
 
 # Page configuration
 st.set_page_config(page_title="Crime Dashboard", layout="wide")
@@ -15,6 +16,11 @@ DATA_DIR = "Streamlit_files"
 def load_csv(filename, **kwargs):
     path = f"{DATA_DIR}/{filename}"
     return pd.read_csv(path, **kwargs)
+
+@st.cache_data
+def load_lsoa_geojson():
+    with open(f"{DATA_DIR}/london_lsoa_filtered.geojson", "r") as f:
+        return json.load(f)
 
 def load_total_burglaries():
     df = load_csv("total_burglaries_per_month.csv", index_col=0)
@@ -59,8 +65,32 @@ if page == "Total Burglaries":
 
 elif page == "LSOA Monthly Crimes":
     df = load_lsoa_monthly()
+    geojson = load_lsoa_geojson()
+
+    # Month selection
+    selected_month = st.selectbox("Select Month", sorted(df["month"].dt.strftime("%Y-%m").unique()))
+    df_month = df[df["month"].dt.strftime("%Y-%m") == selected_month]
+
+    st.subheader(f"Burglary Map for {selected_month}")
+
+    fig = px.choropleth_mapbox(
+        df_month,
+        geojson=geojson,
+        locations="LSOA_code",
+        color="crime_count",
+        featureidkey="properties.LSOA11CD",  # Adjust if your GeoJSON uses a different key
+        mapbox_style="carto-positron",
+        center={"lat": 51.5074, "lon": -0.1278},
+        zoom=9,
+        opacity=0.6,
+        hover_name="LSOA_code"
+    )
+    fig.update_layout(margin={"r":0, "t":0, "l":0, "b":0})
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Time series for selected LSOA
     lsoas = sorted(df["LSOA_code"].unique())
-    selected = st.selectbox("LSOA Code", lsoas)
+    selected = st.selectbox("Inspect Time Series for LSOA", lsoas)
     df_f = df[df["LSOA_code"] == selected]
     st.subheader(f"Monthly Burglaries for {selected}")
     fig = px.line(df_f, x="month", y="crime_count", markers=True)
