@@ -44,7 +44,7 @@ def lsoa_name_map():
 
 def total_burglaries():
     df = load_csv("total_burglaries_per_month.csv", index_col=0)
-    df["month"] = pd.to_datetime(df["month"], format="%Y-%m")
+    df["month"] = pd.to_datetime(df["month"], format="MMM YYYY")
     return df.sort_values("month")
 
 def lsoa_monthly():
@@ -90,10 +90,10 @@ if page == "Total Burglaries":
         min_value=min_dt,
         max_value=max_dt,
         value=(min_dt, max_dt),
-        format="%Y-%m",
+        format="MMM YYYY",
         key="date_range",
     )
-    yoy_toggle = st.toggle("Show YoY % change", key="yoy")
+    yoy_toggle = st.toggle("Show Year‑over‑Year % change", key="yoy")
     rolling_toggle = st.checkbox("3‑month rolling mean", key="rolling")
 
     # Filter + transform
@@ -104,7 +104,7 @@ if page == "Total Burglaries":
         filt["pct_change"] = filt["crime_count"].pct_change(12) * 100
 
     y_col = "pct_change" if yoy_toggle else ("rolling" if rolling_toggle else "crime_count")
-    y_title = "% change YoY" if yoy_toggle else ("3‑month mean" if rolling_toggle else "Burglaries")
+    y_title = "% change YoY"  # Year‑over‑Year percentage change if yoy_toggle else ("3‑month mean" if rolling_toggle else "Burglaries")
 
     fig = px.line(filt, x="month", y=y_col, markers=True, labels={"month": "Month", y_col: y_title})
     fig.update_layout(height=450)
