@@ -90,7 +90,7 @@ if page == "Total Burglaries":
         min_value=min_dt,
         max_value=max_dt,
         value=(min_dt, max_dt),
-        format="%b %Y",
+        format="%Y-%m",
         key="date_range",
     )
     yoy_toggle = st.toggle("Show YoY % change", key="yoy")
