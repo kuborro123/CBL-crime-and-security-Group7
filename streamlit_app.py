@@ -43,8 +43,10 @@ def lsoa_name_map():
 # Dataset‑specific wrappers ---------------------------------------------------
 
 def total_burglaries():
+    """Load monthly burglary totals and parse month column."""
     df = load_csv("total_burglaries_per_month.csv", index_col=0)
-    df["month"] = pd.to_datetime(df["month"], format="MMM YYYY")
+    # CSV holds strings like "2022-03" → parse with %Y-%m
+    df["month"] = pd.to_datetime(df["month"], format="%Y-%m")
     return df.sort_values("month")
 
 def lsoa_monthly():
@@ -90,7 +92,7 @@ if page == "Total Burglaries":
         min_value=min_dt,
         max_value=max_dt,
         value=(min_dt, max_dt),
-        format="MMM YYYY",
+        format="%b %Y",
         key="date_range",
     )
     yoy_toggle = st.toggle("Show Year‑over‑Year % change", key="yoy")
