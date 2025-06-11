@@ -1,20 +1,20 @@
-import pandas as pd
+# --- London Crime Analysis Streamlit App ---
 import streamlit as st
+import pandas as pd
 import plotly.express as px
 import json
 
 # Page configuration
 st.set_page_config(page_title="Crime Dashboard", layout="wide")
-st.title("London Crime Analysis")
+st.title("London Crime Analysis Dashboard")
 
 # Mapbox token
 px.set_mapbox_access_token("pk.eyJ1Ijoia3Vib3JybyIsImEiOiJjbWJwcG93aWMwN2R6MmxxdTNxbGliamdxIn0.2R-jJjLu8pU_dvbr_vylmw")
 
-# File directory for data
+# Data directory
 DATA_DIR = "Streamlit_files"
 
 # ---------- Data Loaders ----------
-
 @st.cache_data(show_spinner="Loading CSV...")
 def load_csv(filename, **kwargs):
     path = f"{DATA_DIR}/{filename}"
@@ -56,7 +56,6 @@ def load_schedule():
     return load_csv("schedule_output.csv")
 
 # ---------- Sidebar Navigation ----------
-
 PAGES = [
     "Total Burglaries",
     "LSOA Monthly Crimes",
@@ -66,72 +65,101 @@ PAGES = [
 
 page = st.sidebar.selectbox("Select Page", PAGES)
 
-# ---------- Page Logic ----------
-
+# ---------- Page 1: Total Burglaries ----------
 if page == "Total Burglaries":
     df = load_total_burglaries()
-    st.subheader("Total Burglaries per Month")
-    fig = px.line(df, x="month", y="crime_count", markers=True)
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(df)
 
+    st.subheader("\U0001F512 Total Burglaries per Month")
+    st.markdown("""
+    Analyze burglary trends across London over time. Adjust the date range and optionally apply a rolling average.
+    """)
+
+    date_range = st.slider("Select Date Range", min_value=df["month"].min().to_pydatetime(),
+                           max_value=df["month"].max().to_pydatetime(),
+                           value=(df["month"].min().to_pydatetime(), df["month"].max().to_pydatetime()),
+                           format="MM/YYYY")
+    df_filtered = df[(df["month"] >= date_range[0]) & (df["month"] <= date_range[1])]
+
+    rolling_enabled = st.checkbox("Apply 3-Month Rolling Average")
+    if rolling_enabled:
+        df_filtered = df_filtered.copy()
+        df_filtered["Rolling Average"] = df_filtered["crime_count"].rolling(window=3).mean()
+
+    fig = px.line(df_filtered, x="month",
+                  y="Rolling Average" if rolling_enabled else "crime_count",
+                  labels={"month": "Month", "crime_count": "Burglaries", "Rolling Average": "3-Month Average"},
+                  markers=True)
+    fig.update_layout(title="Burglary Trends Over Time", xaxis_title="Month", yaxis_title="Number of Burglaries")
+    st.plotly_chart(fig, use_container_width=True)
+
+    with st.expander("Show Raw Data"):
+        st.dataframe(df_filtered.reset_index(drop=True))
+
+# ---------- Page 2: LSOA Monthly Crimes ----------
 elif page == "LSOA Monthly Crimes":
     df = load_lsoa_monthly()
     geojson = load_lsoa_geojson()
     name_map = load_lsoa_name_mapping()
 
-    # Aggregate total crimes per LSOA
-    df_total = df.groupby("LSOA_code", as_index=False)["crime_count"].sum()
+    st.subheader("\U0001F5FA️ Crime by LSOA (Geographic)")
+    st.markdown("""
+    View crime distribution geographically across LSOA regions. Use the dropdown to filter by month.
+    """)
+
+    available_months = sorted(df["month"].dt.to_period("M").unique().to_timestamp())
+    selected_month = st.selectbox("Select Month", available_months)
+
+    df_month = df[df["month"] == selected_month]
+    df_total = df_month.groupby("LSOA_code", as_index=False)["crime_count"].sum()
     df_total["LSOA_name"] = df_total["LSOA_code"].map(name_map)
 
-    st.subheader("Total Burglary Map (All Months Combined)")
-
-    fig = px.choropleth_mapbox(
-        df_total,
-        geojson=geojson,
-        locations="LSOA_code",
-        color="crime_count",
-        featureidkey="properties.LSOA21CD",  # 🔁 Adjust if your GeoJSON uses a different code field
-        hover_name="LSOA_name",
-        mapbox_style="light",
-        center={"lat": 51.5074, "lon": -0.1278},
-        zoom=9,
-        opacity=0.6,
-        color_continuous_scale="OrRd"
-    )
-    fig.update_layout(margin={"r": 0, "t": 0, "l": 0, "b": 0})
+    fig = px.choropleth_mapbox(df_total,
+                                geojson=geojson,
+                                locations="LSOA_code",
+                                color="crime_count",
+                                featureidkey="properties.LSOA21CD",
+                                hover_name="LSOA_name",
+                                mapbox_style="carto-positron",
+                                center={"lat": 51.5074, "lon": -0.1278},
+                                zoom=9,
+                                opacity=0.6,
+                                color_continuous_scale="OrRd")
+    fig.update_layout(margin={"r":0,"t":0,"l":0,"b":0})
     st.plotly_chart(fig, use_container_width=True)
 
-    # Time series for individual LSOA
-    lsoas = sorted(df["LSOA_code"].unique())
-    selected = st.selectbox(
-        "Inspect Time Series for LSOA",
-        options=lsoas,
-        format_func=lambda code: name_map.get(code, code)
-    )
-    df_f = df[df["LSOA_code"] == selected]
-    st.subheader(f"Monthly Burglaries for {name_map.get(selected, selected)}")
-    fig = px.line(df_f, x="month", y="crime_count", markers=True)
-    st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(df_f)
-
+# ---------- Page 3: Deprivation vs Burglaries ----------
 elif page == "Deprivation vs Burglaries":
-    burg = load_burglaries_lsoa()
-    dep = load_deprivation()
-    merged = pd.merge(burg, dep, on="LSOA_code", how="inner")
-    st.subheader("Burglary Count vs Deprivation Score")
-    fig = px.scatter(merged, x="deprivation", y="crime_count", hover_name="LSOA_code")
+    crime_df = load_burglaries_lsoa()
+    deprivation_df = load_deprivation()
+
+    st.subheader("\U0001F4CA Deprivation Index vs. Burglary Rates")
+    st.markdown("""
+    Explore the relationship between socioeconomic deprivation and burglary rates.
+    """)
+
+    merged_df = pd.merge(crime_df, deprivation_df, left_index=True, right_index=True)
+
+    fig = px.scatter(merged_df,
+                     x="IMD_score",
+                     y="crime_count",
+                     labels={"IMD_score": "Deprivation Score", "crime_count": "Burglary Count"},
+                     hover_name=merged_df.index,
+                     trendline="ols")
+    fig.update_layout(title="Correlation Between Deprivation and Burglaries")
     st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(merged)
+    st.dataframe(merged_df.reset_index())
 
+# ---------- Page 4: Resource Allocation ----------
 elif page == "Resource Allocation":
-    df = load_schedule()
-    wards = sorted(df["ward"].unique())
-    ward = st.selectbox("Ward", ["All"] + wards)
-    if ward != "All":
-        df = df[df["ward"] == ward]
-    st.subheader("Officer Allocation Schedule")
-    st.dataframe(df)
+    schedule_df = load_schedule()
 
-# ---------- Footer ----------
-st.markdown("---\nMade with ❤️ using Streamlit")
+    st.subheader("\U0001F46E‍♂️ Optimized Resource Allocation")
+    st.markdown("""
+    View recommended police deployments across LSOAs based on crime trends and optimization model output.
+    """)
+
+    st.dataframe(schedule_df)
+
+    top_areas = schedule_df.sort_values("officers", ascending=False).head(10)
+    st.markdown("### Top 10 Areas by Allocated Officers")
+    st.bar_chart(top_areas.set_index("LSOA_code")["officers"])
