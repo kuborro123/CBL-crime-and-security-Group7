@@ -6,6 +6,7 @@ from pulp import LpProblem, LpVariable, LpInteger, lpSum, LpMaximize, PULP_CBC_C
 from time_series_prediction import prediction_network
 import matplotlib.pyplot as plt
 import os
+import math
 
 # Constants
 WARDS_PATH = 'data/London-wards-2018'
@@ -13,7 +14,7 @@ LSOA_SHAPE_PATH = 'data/LB_LSOA2021_shp'
 MAX_OFFICERS_PER_WARD = 100
 MAX_PATROL_HOURS_PER_OFFICER = 2
 TOTAL_PATROL_HOURS_PER_WARD = MAX_OFFICERS_PER_WARD * MAX_PATROL_HOURS_PER_OFFICER  # 200
-NEIGHBOR_WEIGHT_ALPHA = 0.50
+NEIGHBOR_WEIGHT_ALPHA = 0.5
 mu = NEIGHBOR_WEIGHT_ALPHA
 
 
@@ -153,25 +154,6 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
         lsoas_for_optimization = lsoa_list.copy()
         remaining_officers = MAX_OFFICERS_PER_WARD
 
-        # 3. Pre-allocate 8 officers to each outlier and remove them from the pool
-        # We sort outliers by risk to prioritize the highest-risk ones if officer budget is tight
-        for lsoa_code in outlier_lsoas.sort_values("risk_score", ascending=False)[lsoa_col]:
-            if remaining_officers >= 8:
-                num_off = 8
-                records.append({
-                    "ward": ward,
-                    "lsoa": lsoa_code,
-                    "risk_score": scores[lsoa_code],
-                    "officers_allocated": num_off,
-                    "patrol_hours": num_off * MAX_PATROL_HOURS_PER_OFFICER
-                })
-                remaining_officers -= num_off
-                lsoas_for_optimization.remove(lsoa_code)
-
-        # 4. Run optimization only if there are remaining officers and LSOAs
-        if not lsoas_for_optimization or remaining_officers <= 0:
-            # If all LSOAs were outliers or no officers are left, skip optimization for this ward
-            continue
 
         subset_scores = {l: scores[l] for l in lsoas_for_optimization}
         N = len(lsoas_for_optimization)
@@ -199,7 +181,7 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
         )
         smooth_penalty = lpSum(slack[(i, j)] for i, j in edges)
         prob += base_obj - mu * smooth_penalty
-        prob += lpSum(officers.values()) == total_officers, "Total_Officers"
+        prob += lpSum(officers.values()) <= total_officers, "Total_Officers"
 
         for i, j in edges:
             prob += officers[i] - officers[j] <= slack[(i, j)]
@@ -222,79 +204,54 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
 
 def create_patrol_schedule(allocation_df: pd.DataFrame, neighbor_pairs: list) -> pd.DataFrame:
     """
-    Creates a patrol schedule based on officer allocation, prioritizing neighbor
-    coordination and then ensuring homogeneous coverage for all others.
+    Creates a patrol schedule by distributing officers as evenly as possible
+    across all time blocks for each LSOA.
 
     Args:
         allocation_df: DataFrame from the allocate_resources function.
-        neighbor_pairs: A list of tuples, where each tuple is a pair of adjacent LSOAs.
+        neighbor_pairs: A list of tuples, kept for compatibility but no longer used.
 
     Returns:
         A DataFrame with the schedule, including columns for each time block.
     """
-    # 1. Setup and Initialization
     time_blocks = [
-        "06:00-08:00", "08:00-10:00", "10:00-12:00", "12:00-14:00",
-        "14:00-16:00", "16:00-18:00", "18:00-20:00", "20:00-22:00"
+        "06:00-08:00", "08:00-10:00", "10:00-12:00",
+        "12:00-14:00", "14:00-16:00", "16:00-18:00",
+        "18:00-20:00", "20:00-22:00"
     ]
+    num_slots = len(time_blocks)
 
-    # Prepare the output DataFrame
-    schedule_df = allocation_df.copy()
-    for block in time_blocks:
-        schedule_df[block] = 0
+    # Start with the allocation data
+    sched = allocation_df.copy()
 
-    # Use LSOA code as the index for easy row lookup and modification
-    schedule_df = schedule_df.set_index("lsoa")
+    # Initialize columns for each time block with zeros
+    for blk in time_blocks:
+        sched[blk] = 0
 
-    lsoas_to_schedule = set(schedule_df.index)
+    # Loop through each row (each LSOA) in the allocation dataframe
+    for index, row in sched.iterrows():
+        officers_to_schedule = row["officers_allocated"]
 
-    # 2. Coordinated Neighbor Scheduling (Low-Allocation Pairs)
-    # Convert neighbor pairs to a set for efficient lookup
-    neighbor_set = {tuple(sorted(p)) for p in neighbor_pairs}
+        # Skip if there are no officers to schedule
+        if officers_to_schedule <= 0:
+            continue
 
-    for lsoa1, lsoa2 in neighbor_set:
-        # Check if both LSOAs are in our list and haven't been scheduled yet
-        if lsoa1 in lsoas_to_schedule and lsoa2 in lsoas_to_schedule:
-            officers1 = schedule_df.loc[lsoa1, "officers_allocated"]
-            officers2 = schedule_df.loc[lsoa2, "officers_allocated"]
+        # Determine the base number of officers for each slot
+        base_officers_per_slot = officers_to_schedule // num_slots
 
-            # Define the "low allocation" threshold for coordination
-            if 0 < officers1 <= 2 and 0 < officers2 <= 2:
-                # Pool the officers and create a non-overlapping schedule
+        # Determine how many "extra" officers need to be distributed
+        extra_officers = officers_to_schedule % num_slots
 
-                # Schedule LSOA 1 in the earliest available slots
-                i = 0
-                for _ in range(officers1):
-                    schedule_df.loc[lsoa1, time_blocks[i]] += 1
-                    i += 1
+        # Assign officers to the time blocks
+        for i, block in enumerate(time_blocks):
+            # Every slot gets the base number of officers
+            sched.loc[index, block] = base_officers_per_slot
 
-                # Schedule LSOA 2 in the next available slots
-                for _ in range(officers2):
-                    # Ensure we don't go out of bounds
-                    if i < len(time_blocks):
-                        schedule_df.loc[lsoa2, time_blocks[i]] += 1
-                        i += 1
+            # The first few slots get one extra officer until the remainder is used up
+            if i < extra_officers:
+                sched.loc[index, block] += 1
 
-                # Mark both as "done"
-                lsoas_to_schedule.remove(lsoa1)
-                lsoas_to_schedule.remove(lsoa2)
-
-    # 3. Independent Homogeneous Scheduling (for all remaining LSOAs)
-    for lsoa in lsoas_to_schedule:
-        officers_to_assign = schedule_df.loc[lsoa, "officers_allocated"]
-
-        if officers_to_assign > 0:
-            time_block_index = 0
-            while officers_to_assign > 0:
-                # Get the current time block and assign an officer
-                block = time_blocks[time_block_index]
-                schedule_df.loc[lsoa, block] += 1
-
-                # Decrement officers and move to the next time block
-                officers_to_assign -= 1
-                time_block_index = (time_block_index + 1) % len(time_blocks)
-
-    return schedule_df.reset_index()
+    return sched
 
 
 def plot_schedule_maps(schedule_df: pd.DataFrame, lsoas: gpd.GeoDataFrame, wards: gpd.GeoDataFrame, ward_col: str,
@@ -314,6 +271,8 @@ def plot_schedule_maps(schedule_df: pd.DataFrame, lsoas: gpd.GeoDataFrame, wards
         "06:00-08:00", "08:00-10:00", "10:00-12:00", "12:00-14:00",
         "14:00-16:00", "16:00-18:00", "18:00-20:00", "20:00-22:00"
     ]
+
+    ward_col = 'lad22nm'
 
     # Merge the geometries into the schedule dataframe once
     map_df = lsoas.merge(schedule_df, on=lsoa_col, how="left")
@@ -369,7 +328,8 @@ def plot_schedule_maps(schedule_df: pd.DataFrame, lsoas: gpd.GeoDataFrame, wards
         plt.show()
 
 
-ward_col = "lad22nm"
+# 'lad22nm'
+ward_col = "ward_name"  # Adjust this to the correct ward column name in your wards GeoDataFrame
 wards = find_london_wards(WARDS_PATH)
 lsoas, lsoa_col = load_lsoa_data(LSOA_SHAPE_PATH)
 
@@ -385,20 +345,34 @@ lsoas["risk_score"] = lsoas["lsoa21cd"].map(lsoa_predicted_risk_score)
 lsoas["risk_score"] = pd.to_numeric(lsoas["risk_score"], errors="coerce")
 lsoas["risk_score"].fillna(0, inplace=True)
 
-# Assign LSOA codes to wards and group lsoa by ward
-lsoas_with_wards = gpd.sjoin(lsoas, wards, how="left", predicate="within")
-# Use the correct ward column name after the join
-if f"{ward_col}_right" in lsoas_with_wards.columns:
-    ward_col_grouped = f"{ward_col}_right"
-else:
-    ward_col_grouped = ward_col
-ward_to_lsoas = lsoas_with_wards.groupby(ward_col_grouped)[lsoa_col].apply(list).to_dict()
+intersections = gpd.overlay(
+    lsoas[[lsoa_col, "geometry"]],
+    wards[[ward_col, "geometry"]],
+    how="intersection"
+)
 
+intersections["area"] = intersections.geometry.area
+
+idx = intersections.groupby(lsoa_col)["area"].idxmax()
+primary = intersections.loc[idx, [lsoa_col, ward_col]]
+
+ward_to_lsoas = (
+    primary
+    .groupby(ward_col)[lsoa_col]
+    .apply(list)
+    .to_dict()
+)
+ward_col_grouped = ward_col
 allocation_df = allocate_resources(lsoas, ward_to_lsoas, lsoa_col, ward_col_grouped)
-schedule = create_patrol_schedule(allocation_df, compute_neighbor_pairs_with_weights(lsoas, lsoa_col, lsoas.set_index(lsoa_col)["risk_score"].to_dict())[0])
+schedule = create_patrol_schedule(allocation_df, compute_neighbor_pairs_with_weights(lsoas, lsoa_col,
+                                                                                     lsoas.set_index(lsoa_col)[
+                                                                                         "risk_score"].to_dict())[0])
 print(schedule.to_string())
 
-# --- FIX: Rename the 'lsoa' column to the correct name before plotting ---
+# Count the total number of unique wards
+total_wards = wards['ward_code'].nunique()
+print(f"Total number of wards: {total_wards}")
+
 schedule = schedule.rename(columns={"lsoa": lsoa_col})
 schedule.to_csv('schedule_output.csv', index=False)
 plot_schedule_maps(schedule, lsoas, wards, ward_col_grouped, lsoa_col)
