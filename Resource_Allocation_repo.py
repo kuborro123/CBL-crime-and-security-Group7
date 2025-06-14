@@ -203,53 +203,87 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
 
 
 def create_patrol_schedule(allocation_df: pd.DataFrame, neighbor_pairs: list) -> pd.DataFrame:
-    """
-    Creates a patrol schedule by distributing officers as evenly as possible
-    across all time blocks for each LSOA.
 
-    Args:
-        allocation_df: DataFrame from the allocate_resources function.
-        neighbor_pairs: A list of tuples, kept for compatibility but no longer used.
-
-    Returns:
-        A DataFrame with the schedule, including columns for each time block.
-    """
+    # Define time blocks for the patrol schedule.
     time_blocks = [
-        "06:00-08:00", "08:00-10:00", "10:00-12:00",
-        "12:00-14:00", "14:00-16:00", "16:00-18:00",
-        "18:00-20:00", "20:00-22:00"
+        "06:00-08:00", "08:00-10:00", "10:00-12:00", "12:00-14:00",
+        "14:00-16:00", "16:00-18:00", "18:00-20:00", "20:00-22:00"
     ]
-    num_slots = len(time_blocks)
 
-    # Start with the allocation data
+    # Assign weights to prioritize shifts after 10 AM.
+    time_block_weights = OrderedDict([
+        ("06:00-08:00", 1.0),  # Lower priority
+        ("08:00-10:00", 1.0),  # Lower priority
+        ("10:00-12:00", 2.0),  # Higher priority
+        ("12:00-14:00", 2.0),  # Higher priority
+        ("14:00-16:00", 2.0),  # Higher priority
+        ("16:00-18:00", 2.0),  # Higher priority
+        ("18:00-20:00", 2.0),  # Higher priority
+        ("20:00-22:00", 2.0)  # Higher priority
+    ])
+
+    total_weight = sum(time_block_weights.values())
+
+    # Start with the original allocation data
     sched = allocation_df.copy()
 
-    # Initialize columns for each time block with zeros
+    # Initialize time block columns with zero officers
     for blk in time_blocks:
         sched[blk] = 0
 
-    # Loop through each row (each LSOA) in the allocation dataframe
+    # Iterate over each LSOA to schedule its allocated officers
     for index, row in sched.iterrows():
         officers_to_schedule = row["officers_allocated"]
 
-        # Skip if there are no officers to schedule
+        # Skip LSOAs with no officers assigned
         if officers_to_schedule <= 0:
             continue
 
-        # Determine the base number of officers for each slot
-        base_officers_per_slot = officers_to_schedule // num_slots
+        # NEW RULE: If total officers > 32, apply a flat cap of 4 officers per time block.
+        if officers_to_schedule > 32:
+            for block in time_blocks:
+                sched.loc[index, block] = 4
+            # After applying the flat schedule, move to the next LSOA.
+            continue
 
-        # Determine how many "extra" officers need to be distributed
-        extra_officers = officers_to_schedule % num_slots
+            # --- Weighted Allocation Logic (for LSOAs with <= 32 officers) ---
 
-        # Assign officers to the time blocks
-        for i, block in enumerate(time_blocks):
-            # Every slot gets the base number of officers
-            sched.loc[index, block] = base_officers_per_slot
+        # Calculate the ideal, fractional allocation based on weights
+        ideal_allocations = {
+            blk: (officers_to_schedule * weight) / total_weight
+            for blk, weight in time_block_weights.items()
+        }
 
-            # The first few slots get one extra officer until the remainder is used up
-            if i < extra_officers:
-                sched.loc[index, block] += 1
+        # Determine the base number of officers (the integer part)
+        base_allocations = {
+            blk: int(alloc) for blk, alloc in ideal_allocations.items()
+        }
+
+        # Calculate how many officers are left to schedule (the remainder)
+        allocated_so_far = sum(base_allocations.values())
+        remainder_officers = int(officers_to_schedule - allocated_so_far)
+
+        # Distribute the remainder officers based on the largest fractional parts
+        if remainder_officers > 0:
+            # Calculate fractional parts to determine priority
+            fractional_parts = {
+                blk: alloc - base_allocations[blk]
+                for blk, alloc in ideal_allocations.items()
+            }
+
+            # Sort blocks by fractional part to distribute remainders fairly
+            sorted_blocks_for_remainder = sorted(
+                fractional_parts, key=fractional_parts.get, reverse=True
+            )
+
+            # Add remainder officers one by one to the most deserving slots
+            for i in range(remainder_officers):
+                block_to_add = sorted_blocks_for_remainder[i]
+                base_allocations[block_to_add] += 1
+
+        # Assign the final officer counts to the schedule
+        for block, num_officers in base_allocations.items():
+            sched.loc[index, block] = num_officers
 
     return sched
 
