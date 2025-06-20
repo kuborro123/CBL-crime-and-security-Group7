@@ -142,14 +142,7 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
         ward_avg = risk_scores.mean()
         ward_std = risk_scores.std()
 
-        # Handle cases where std is 0 to avoid division by zero or pointless checks
-        if pd.isna(ward_std) or ward_std == 0:
-            threshold = ward_avg
-        else:
-            threshold = ward_avg + (2.5 * ward_std)
 
-        # 2. Identify outlier LSOAs (score > avg + 3*std)
-        outlier_lsoas = ward_lsoas[ward_lsoas["risk_score"] > threshold]
 
         lsoas_for_optimization = lsoa_list.copy()
         remaining_officers = MAX_OFFICERS_PER_WARD
@@ -204,7 +197,6 @@ def allocate_resources(lsoas: gpd.GeoDataFrame, ward_to_lsoas: dict, lsoa_col: s
 
 def create_patrol_schedule(allocation_df: pd.DataFrame, neighbor_pairs: list) -> pd.DataFrame:
 
-    # Define time blocks for the patrol schedule.
     time_blocks = [
         "06:00-08:00", "08:00-10:00", "10:00-12:00", "12:00-14:00",
         "14:00-16:00", "16:00-18:00", "18:00-20:00", "20:00-22:00"
@@ -212,19 +204,17 @@ def create_patrol_schedule(allocation_df: pd.DataFrame, neighbor_pairs: list) ->
 
     # Assign weights to prioritize shifts after 10 AM.
     time_block_weights = OrderedDict([
-        ("06:00-08:00", 1.0),  # Lower priority
-        ("08:00-10:00", 1.0),  # Lower priority
-        ("10:00-12:00", 2.0),  # Higher priority
-        ("12:00-14:00", 2.0),  # Higher priority
-        ("14:00-16:00", 2.0),  # Higher priority
-        ("16:00-18:00", 2.0),  # Higher priority
-        ("18:00-20:00", 2.0),  # Higher priority
-        ("20:00-22:00", 2.0)  # Higher priority
+        ("06:00-08:00", 1.0),
+        ("08:00-10:00", 1.0),
+        ("10:00-12:00", 2.0),
+        ("12:00-14:00", 2.0),
+        ("14:00-16:00", 2.0),
+        ("16:00-18:00", 2.0),
+        ("18:00-20:00", 2.0),
+        ("20:00-22:00", 2.0)
     ])
 
     total_weight = sum(time_block_weights.values())
-
-    # Start with the original allocation data
     sched = allocation_df.copy()
 
     # Initialize time block columns with zero officers
@@ -239,14 +229,11 @@ def create_patrol_schedule(allocation_df: pd.DataFrame, neighbor_pairs: list) ->
         if officers_to_schedule <= 0:
             continue
 
-        # NEW RULE: If total officers > 32, apply a flat cap of 4 officers per time block.
         if officers_to_schedule > 32:
             for block in time_blocks:
                 sched.loc[index, block] = 4
             # After applying the flat schedule, move to the next LSOA.
             continue
-
-            # --- Weighted Allocation Logic (for LSOAs with <= 32 officers) ---
 
         # Calculate the ideal, fractional allocation based on weights
         ideal_allocations = {
@@ -254,24 +241,23 @@ def create_patrol_schedule(allocation_df: pd.DataFrame, neighbor_pairs: list) ->
             for blk, weight in time_block_weights.items()
         }
 
-        # Determine the base number of officers (the integer part)
+        # Determine the base number of officers
         base_allocations = {
             blk: int(alloc) for blk, alloc in ideal_allocations.items()
         }
 
-        # Calculate how many officers are left to schedule (the remainder)
+        # Calculate how many officers are left to schedule
         allocated_so_far = sum(base_allocations.values())
         remainder_officers = int(officers_to_schedule - allocated_so_far)
 
         # Distribute the remainder officers based on the largest fractional parts
         if remainder_officers > 0:
-            # Calculate fractional parts to determine priority
             fractional_parts = {
                 blk: alloc - base_allocations[blk]
                 for blk, alloc in ideal_allocations.items()
             }
 
-            # Sort blocks by fractional part to distribute remainders fairly
+
             sorted_blocks_for_remainder = sorted(
                 fractional_parts, key=fractional_parts.get, reverse=True
             )
@@ -290,17 +276,8 @@ def create_patrol_schedule(allocation_df: pd.DataFrame, neighbor_pairs: list) ->
 
 def plot_schedule_maps(schedule_df: pd.DataFrame, lsoas: gpd.GeoDataFrame, wards: gpd.GeoDataFrame, ward_col: str,
                        lsoa_col: str):
-    """
-    Generates and displays a separate map for each time block in the schedule.
 
-    Args:
-        schedule_df: The final DataFrame containing the schedule.
-        lsoas: The base GeoDataFrame for LSOA geometries.
-        wards: The base GeoDataFrame for ward geometries.
-        ward_col: The name of the ward column.
-        lsoa_col: The name of the LSOA column.
-    """
-    # Identify the time block columns to be plotted
+
     time_blocks = [
         "06:00-08:00", "08:00-10:00", "10:00-12:00", "12:00-14:00",
         "14:00-16:00", "16:00-18:00", "18:00-20:00", "20:00-22:00"
@@ -344,7 +321,6 @@ def plot_schedule_maps(schedule_df: pd.DataFrame, lsoas: gpd.GeoDataFrame, wards
                 "shrink": 0.6
             },
             ax=ax,
-            # Use vmin/vmax for a consistent color scale across all maps
             vmin=0,
             vmax=max_officers_in_slot
         )
@@ -363,7 +339,7 @@ def plot_schedule_maps(schedule_df: pd.DataFrame, lsoas: gpd.GeoDataFrame, wards
 
 
 # 'lad22nm'
-ward_col = "ward_name"  # Adjust this to the correct ward column name in your wards GeoDataFrame
+ward_col = "ward_name"
 wards = find_london_wards(WARDS_PATH)
 lsoas, lsoa_col = load_lsoa_data(LSOA_SHAPE_PATH)
 
