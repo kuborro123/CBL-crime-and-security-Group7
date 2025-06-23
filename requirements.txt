@@ -1,4 +1,0 @@
-streamlit>=1.25
-pandas
-plotly
-statsmodels
