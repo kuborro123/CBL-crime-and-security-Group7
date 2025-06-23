@@ -1,45 +1,43 @@
-# CBL-crime-and-security-Group7
-# London Crime Data Analysis and Prediction System
+# London Crime Data Analysis and Resource Allocation
 
 ## Project Overview
 
-Our project provides comprehensive analysis of crime data in London with a focus on burglary crimes. By combining data visualization and time series forecasting using SARIMAX models, it offers data-driven insights and recommendations for optimizing police resource allocation.
+This project analyzes crime data in London with a focus on burglary crimes. It uses data visualization and time series forecasting with SARIMAX models to provide insights and recommendations for police resource allocation.
 
-## Key Features
+## Features
 
-- **Crime Data Analysis**: Statistical analysis of London crime data with emphasis on burglary incidents
-- **Data Visualization**: Interactive charts and maps showing crime distribution and trends
-- **Time Series Forecasting**: SARIMAX model implementation for predicting future crime patterns
-- **Resource Optimization**: Data-driven recommendations for police force deployment
+- Crime data analysis focusing on burglary incidents in London
+- Data visualization with charts and maps showing crime patterns
+- Time series forecasting using SARIMAX models
+- Police resource allocation recommendations
+- Interactive web application built with Streamlit
 
-## Tech Stack
+## Technology Used
 
-- **Python**: Primary programming language
-- **Pandas**: Data manipulation and analysis
-- **Matplotlib/Seaborn**: Data visualization
-- **Statsmodels**: SARIMAX time series modeling
+- Python
+- Pandas for data processing
+- Matplotlib and Seaborn for visualization
+- Statsmodels for SARIMAX modeling
+- Streamlit for web application
+- Plotly for interactive charts
 
 ## Project Structure
 
 ```
-├── data/                    # Data directory
-├── .devcontainer/             # 
-├── .idea/                    # 
-├── src/                    # documentation
-│   └── README.md          # Project documentation
-├── visualization/        #visualization outcome graphs
-├── Data_loader.py          #data import
-├── Dataset_maker.py        #data import
-├── requirements.txt        # 
-├── streamlit_app.py       #the web to show our allocation
-├── Deprivation_prediction.py      #the prediction model
-├── time_series_prediction.py       #the primary prediction model
-├── Resource_Allocation_repo.py       #polcie allocation file
+CBL-crime-and-security-Group7/
+├── data/                           # Data files
+├── src/                           # Source code
+├── visualization/                  # Generated charts and graphs
+├── Data_loader.py                 # Data loading functions
+├── Dataset_maker.py               # Data preprocessing
+├── requirements.txt               # Required packages
+├── streamlit_app.py              # Web application
+├── Deprivation_prediction.py     # Deprivation prediction model
+├── time_series_prediction.py     # Time series forecasting
+└── Resource_Allocation_repo.py   # Resource allocation algorithms
 ```
 
-## Installation and Usage
-
-### Installation Steps
+## Installation
 
 1. Clone the repository:
    ```bash
@@ -55,57 +53,80 @@ Our project provides comprehensive analysis of crime data in London with a focus
    venv\Scripts\activate     # Windows
    ```
 
-3. Install dependencies:
+3. Install required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### Data Setup
+## How to Run
 
+1. Run the data processing scripts first:
+   ```bash
+   python Data_loader.py
+   python Dataset_maker.py
+   ```
 
-### Running the Analysis
+2. Run the prediction models:
+   ```bash
+   python time_series_prediction.py
+   python Deprivation_prediction.py
+   ```
 
-Execute the files in the following order:
+3. Generate resource allocation recommendations:
+   ```bash
+   python Resource_Allocation_repo.py
+   ```
 
-1. 
+4. Launch the web application:
+   ```bash
+   streamlit run streamlit_app.py
+   ```
 
-## Module Documentation
+The web app will open at http://localhost:8501
 
-### Data Processing Module (`Data_loader.py & Dataset_maker.py`)
-- Data cleaning and preprocessing
-- Time series data preparation
+## What the Project Does
 
-### Visualization Module (`Data_visualization.py`)
-- Crime heatmap generation
-- Temporal trend analysis
-- Geographic distribution mapping
+### Data Analysis
+- Processes London crime data
+- Focuses on burglary crime patterns
+- Analyzes trends over time and across different areas
 
-### Modeling Module (`Deprivation_prediction.py`)
-- SARIMAX model construction
-- Parameter optimization
-- Forecast generation and validation
+### Visualization
+- Creates crime heat maps
+- Shows temporal trends in crime data
+- Maps crime distribution across London boroughs
 
-### Optimization Module (`Resource_Allocation_repo.py`)
-- Prediction-based resource allocation algorithms
-- Police deployment optimization
+### Prediction
+- Uses SARIMAX models for time series forecasting
+- Predicts future crime patterns
+- Considers seasonal and trend components
 
-## Output and Results
+### Resource Allocation
+- Recommends optimal police deployment
+- Based on predicted crime patterns
+- Aims to improve resource efficiency
 
-- **Visualization Reports**: Charts, maps, and interactive dashboards
-- **Prediction Results**: Future crime trend forecasts
-- **Optimization Recommendations**: Police resource allocation strategies
-- **Analysis Reports**: Comprehensive project documentation
+## Output
+
+The project generates:
+- Interactive charts and maps
+- Crime trend forecasts
+- Police resource allocation recommendations
+- Summary reports
 
 ## Data Sources
 
-- London Metropolitan Police Crime Data
-- Additional demographic and socioeconomic datasets
+- London Metropolitan Police crime data
+- Demographic and socioeconomic data
+- Geographic data for London areas
 
+## Group Information
 
-## Contact
+This project was developed by Group 7 as part of a university course.
 
-- Project Maintainer: Group 7
-- Email: 
-- Project Link: https://github.com/kuborro123/CBL-crime-and-security-Group7
+Repository: https://github.com/kuborro123/CBL-crime-and-security-Group7
 
+## Note
 
----
-
-**Disclaimer**: This project is for academic and educational purposes only. 
+This project is for educational purposes only. The analysis and recommendations are part of academic coursework and should not be used for actual police operations.
+```
